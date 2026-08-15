@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Honeypot logs (do not commit live attack data)
+cowrie.json
+*.jsonl
+
+# Optional user-provided GeoIP database (licensed separately, large)
+data/*.mmdb
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

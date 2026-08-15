@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>COWTAIL // Honeypot Monitor</title>
+
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="fx fx-grid" aria-hidden="true"></div>
+  <div class="fx fx-glow" aria-hidden="true"></div>
+  <div class="fx fx-scan" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 48 48" aria-hidden="true">
+        <path class="logo-shell" d="M24 6c7 0 12 6 12 13 0 4-2 7-5 9 0 5-2 9-7 9s-7-4-7-9c-3-2-5-5-5-9C12 12 17 6 24 6z" fill="none"/>
+        <path class="logo-spiral" d="M24 12c3 0 6 2 6 6 0 3-1 5-4 6 0 2-1 4-2 4s-2-2-2-4c-2-1-4-3-4-6 0-4 3-6 6-6z" fill="none"/>
+        <circle class="logo-dot" cx="26" cy="18" r="1.4"/>
+      </svg>
+      <div class="brand-text">
+        <h1>COWTAIL</h1>
+        <span class="tagline">INTRUSION DECEPTION GRID</span>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <div class="mode-pill" id="modePill" data-mode="live">LIVE</div>
+      <div class="conn">
+        <span class="live-dot" id="liveDot"></span>
+        <span id="connStatus">CONNECTING</span>
+      </div>
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="sensor" id="sensor">SENSOR —</div>
+    </div>
+  </header>
+
+  <section class="kpi-grid" id="kpiGrid">
+    <article class="kpi kpi--cyan" style="--i:0">
+      <div class="kpi-head"><span class="kpi-label">Connections</span><span class="kpi-icon">▤</span></div>
+      <div class="kpi-value" id="kpiConnections">0</div>
+      <div class="kpi-foot">total sessions opened</div>
+    </article>
+    <article class="kpi kpi--green" style="--i:1">
+      <div class="kpi-head"><span class="kpi-label">Login Success</span><span class="kpi-icon">✓</span></div>
+      <div class="kpi-value" id="kpiLoginOk">0</div>
+      <div class="kpi-foot">credentials accepted</div>
+    </article>
+    <article class="kpi kpi--red" style="--i:2">
+      <div class="kpi-head"><span class="kpi-label">Login Failed</span><span class="kpi-icon">✕</span></div>
+      <div class="kpi-value" id="kpiLoginFail">0</div>
+      <div class="kpi-foot">credentials rejected</div>
+    </article>
+    <article class="kpi kpi--amber" style="--i:3">
+      <div class="kpi-head"><span class="kpi-label">Attackers</span><span class="kpi-icon">◉</span></div>
+      <div class="kpi-value" id="kpiAttackers">0</div>
+      <div class="kpi-foot">unique source IPs</div>
+    </article>
+    <article class="kpi kpi--blue" style="--i:4">
+      <div class="kpi-head"><span class="kpi-label">Commands</span><span class="kpi-icon">❯_</span></div>
+      <div class="kpi-value" id="kpiCommands">0</div>
+      <div class="kpi-foot">shell commands captured</div>
+    </article>
+    <article class="kpi kpi--violet" style="--i:5">
+      <div class="kpi-head"><span class="kpi-label">Countries</span><span class="kpi-icon">🌐</span></div>
+      <div class="kpi-value" id="kpiCountries">0</div>
+      <div class="kpi-foot">nations attacking</div>
+    </article>
+  </section>
+
+  <div class="timebar" id="timebar">
+    <span class="timebar-label">TIME RANGE</span>
+    <span class="timebar-display" id="timeDisplay">all data</span>
+    <div class="tr-slider">
+      <div class="tr-track"></div>
+      <input type="range" class="tr-input" id="rangeLo" min="0" max="1000" value="0" />
+      <input type="range" class="tr-input" id="rangeHi" min="0" max="1000" value="1000" />
+    </div>
+    <button class="chip" id="rangeReset">Reset</button>
+  </div>
+
+  <main class="dashboard">
+    <section class="panel map-panel">
+      <div class="panel-head">
+        <span class="panel-title">ATTACK ORIGINS</span>
+        <span class="panel-sub">GEOIP TRACE</span>
+        <span class="panel-ctrl">
+          <button class="pbtn" data-act="min" title="Collapse / expand">▾</button>
+          <button class="pbtn" data-act="max" title="Maximize / restore">□</button>
+        </span>
+      </div>
+      <div id="map"></div>
+      <div class="map-legend">
+        <span class="legend-item"><i class="dot dot--recon"></i> recon</span>
+        <span class="legend-item"><i class="dot dot--compromise"></i> compromised login</span>
+        <span class="legend-item"><i class="dot dot--malware"></i> malware payload</span>
+        <span class="legend-item"><i class="dot dot--honeypot"></i> honeypot</span>
+        <a class="map-attr" href="https://db-ip.com" target="_blank" rel="noopener">GeoIP data © DB-IP.com</a>
+      </div>
+    </section>
+
+    <section class="panel feed-panel">
+      <div class="panel-head">
+        <span class="panel-title">LIVE EVENT STREAM</span>
+        <span class="panel-sub" id="feedSub">—</span>
+        <span class="panel-ctrl">
+          <button class="pbtn" data-act="min" title="Collapse / expand">▾</button>
+          <button class="pbtn" data-act="max" title="Maximize / restore">□</button>
+        </span>
+      </div>
+      <div class="filter-bar">
+        <label class="toggle"><input type="checkbox" id="summarizeFeed" /> Summarize by session</label>
+      </div>
+      <div class="feed" id="feed">
+        <div class="feed-empty">awaiting events…</div>
+      </div>
+    </section>
+
+    <section class="panel intel-panel">
+      <div class="panel-head">
+        <span class="panel-title">INTELLIGENCE</span>
+        <div class="tab-bar">
+          <button class="tab active" data-tab="timeline">Timeline</button>
+          <button class="tab" data-tab="creds">Credentials</button>
+          <button class="tab" data-tab="commands">Commands</button>
+          <button class="tab" data-tab="countries">Countries</button>
+        </div>
+        <span class="panel-ctrl">
+          <button class="pbtn" data-act="min" title="Collapse / expand">▾</button>
+          <button class="pbtn" data-act="max" title="Maximize / restore">□</button>
+        </span>
+      </div>
+      <div class="tab-body">
+        <div class="tab-pane active" data-pane="timeline">
+          <div class="chart-wrap"><canvas id="timelineChart"></canvas></div>
+        </div>
+        <div class="tab-pane" data-pane="creds">
+          <div class="creds-grid">
+            <div class="chart-wrap"><canvas id="usernameChart"></canvas></div>
+            <div class="chart-wrap"><canvas id="passwordChart"></canvas></div>
+          </div>
+        </div>
+        <div class="tab-pane" data-pane="commands">
+          <div class="chart-wrap"><canvas id="commandChart"></canvas></div>
+        </div>
+        <div class="tab-pane" data-pane="countries">
+          <div class="countries-layout">
+            <div class="country-list" id="countryList">
+              <div class="country-empty">resolving geoip…</div>
+            </div>
+            <div class="chart-wrap chart-wrap--donut"><canvas id="protocolChart"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel sessions-panel">
+      <div class="panel-head">
+        <span class="panel-title">ATTACKER SESSIONS</span>
+        <span class="panel-sub" id="sessionsSub">—</span>
+        <span class="panel-ctrl">
+          <button class="pbtn" data-act="min" title="Collapse / expand">▾</button>
+          <button class="pbtn" data-act="max" title="Maximize / restore">□</button>
+        </span>
+      </div>
+      <div class="filter-bar">
+        <input class="filter-input" id="sessionsFilter" placeholder="filter IP / country / creds…" />
+        <label class="toggle"><input type="checkbox" id="groupSessions" /> Group by IP</label>
+        <div class="chips" data-group="sessions">
+          <button class="chip active" data-value="all">All</button>
+          <button class="chip" data-value="malware">Malware</button>
+          <button class="chip" data-value="compromised">Compromised</button>
+          <button class="chip" data-value="recon">Recon</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="sessions-table">
+          <thead>
+            <tr>
+              <th>Attacker</th><th>Country</th><th>Proto</th><th>Port</th>
+              <th>Started</th><th>Duration</th><th>Creds</th><th>Cmds</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="sessionsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel malware-panel">
+      <div class="panel-head">
+        <span class="panel-title">MALWARE PAYLOADS</span>
+        <span class="panel-sub" id="malwareSub">—</span>
+        <span class="panel-ctrl">
+          <button class="pbtn" data-act="min" title="Collapse / expand">▾</button>
+          <button class="pbtn" data-act="max" title="Maximize / restore">□</button>
+        </span>
+      </div>
+      <div class="filter-bar">
+        <input class="filter-input" id="malwareFilter" placeholder="filter URL / hash / IP…" />
+        <label class="toggle"><input type="checkbox" id="groupByIp" /> Group by IP</label>
+        <div class="chips" data-group="malware">
+          <button class="chip active" data-value="all">All</button>
+          <button class="chip" data-value="malicious">Malicious</button>
+          <button class="chip" data-value="clean">Clean</button>
+          <button class="chip" data-value="unknown">Unknown</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="sessions-table malware-table">
+          <thead>
+            <tr>
+              <th>Time</th><th>Attacker</th><th>Country</th><th>Payload URL</th><th>SHA-256</th><th>VT</th><th>Detections</th><th>Proto</th>
+            </tr>
+          </thead>
+          <tbody id="malwareBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div class="max-backdrop" id="maxBackdrop"></div>
+
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script src="/static/vendor/chartjs/chart.umd.min.js"></script>
+  <script src="/static/vendor/world-data.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
