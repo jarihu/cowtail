@@ -2,7 +2,11 @@
 
 A real-time, fully-offline web dashboard for the [Cowrie](https://github.com/cowrie/cowrie) SSH/Telnet honeypot. It tails your `cowrie.json` event log and streams it to the browser over WebSocket — no page polling, no auto-refresh, no internet required at runtime.
 
-![Cowtail](https://via.placeholder.com/1200x700/0a121c/41e0f7?text=Cowtail+screenshot)
+![Cowtail dashboard](screenshots/cowtail-hero.png)
+
+## Screenshots
+
+![Cowtail — live attack map and event stream](screenshots/cowtail-screenshot.png)
 
 ## Features
 
