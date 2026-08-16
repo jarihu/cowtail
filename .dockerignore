@@ -1,0 +1,23 @@
+.git
+.github
+.gitignore
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+graphify-out/
+screenshots/
+tests/
+conftest.py
+pytest.ini
+
+# Large / optional runtime data — mount these at runtime instead.
+data/*.mmdb
+data/cowrie.json
+*.jsonl
+cowrie.json

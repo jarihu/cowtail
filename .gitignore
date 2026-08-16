@@ -22,3 +22,5 @@ data/*.mmdb
 Thumbs.db
 .idea/
 .vscode/
+
+graphify-out/

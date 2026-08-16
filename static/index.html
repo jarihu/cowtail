@@ -126,6 +126,7 @@
           <button class="tab" data-tab="creds">Credentials</button>
           <button class="tab" data-tab="commands">Commands</button>
           <button class="tab" data-tab="countries">Countries</button>
+          <button class="tab" data-tab="isps">Worst ISPs</button>
         </div>
         <span class="panel-ctrl">
           <button class="pbtn" data-act="min" title="Collapse / expand">▾</button>
@@ -151,6 +152,11 @@
               <div class="country-empty">resolving geoip…</div>
             </div>
             <div class="chart-wrap chart-wrap--donut"><canvas id="protocolChart"></canvas></div>
+          </div>
+        </div>
+        <div class="tab-pane" data-pane="isps">
+          <div class="country-list" id="ispList">
+            <div class="country-empty">resolving ISP data…</div>
           </div>
         </div>
       </div>
@@ -225,6 +231,6 @@
   <script src="/static/vendor/leaflet/leaflet.js"></script>
   <script src="/static/vendor/chartjs/chart.umd.min.js"></script>
   <script src="/static/vendor/world-data.js"></script>
-  <script src="/static/app.js"></script>
+  <script type="module" src="/static/app.js"></script>
 </body>
 </html>

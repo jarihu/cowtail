@@ -1,0 +1,28 @@
+services:
+  demo:
+    build: .
+    image: cowtail
+    container_name: cowtail-demo
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  live:
+    build: .
+    image: cowtail
+    container_name: cowtail-live
+    profiles: ["live"]
+    environment:
+      COWRIE_LOG: /data/cowrie.json
+      HONEYPOT_LAT: "52.3676"
+      HONEYPOT_LNG: "4.9041"
+      HONEYPOT_LABEL: "My Honeypot"
+    volumes:
+      - ./cowrie.json:/data/cowrie.json:ro
+      # Uncomment once you have a city/ASN database alongside cowrie.json.
+      # - ./data/GeoLite2-City.mmdb:/app/data/GeoLite2-City.mmdb:ro
+      # - ./data/GeoLite2-ASN.mmdb:/app/data/GeoLite2-ASN.mmdb:ro
+    ports:
+      - "8080:8080"
+    command: ["python", "server.py"]
+    restart: unless-stopped
