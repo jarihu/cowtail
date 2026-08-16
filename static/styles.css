@@ -857,11 +857,28 @@ body.has-max .max-backdrop { display: block; }
   box-shadow: 0 0 12px -4px rgba(154, 123, 255, 0.4);
 }
 
+.history-rangebar {
+  position: relative; z-index: 1;
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 18px;
+  max-width: 1720px; width: 100%; margin: 0 auto;
+}
+.range-label {
+  font-family: var(--font-display); font-size: 10px; letter-spacing: 2px;
+  color: var(--muted); white-space: nowrap;
+}
+.range-value {
+  font-size: 11px; color: var(--violet);
+  padding: 3px 10px; border: 1px solid rgba(154, 123, 255, 0.3); border-radius: var(--radius);
+  background: rgba(154, 123, 255, 0.06);
+}
+
 .history-dashboard .narrative-panel { grid-column: span 12; }
-.history-dashboard .pattern-panel { grid-column: span 12; height: 320px; }
+.history-dashboard .pattern-panel { grid-column: span 12; height: 490px; }
 .history-dashboard .attackers-panel { grid-column: span 7; height: 420px; }
 .history-dashboard .country-panel { grid-column: span 5; height: 420px; }
-.history-dashboard .protocol-panel { grid-column: span 12; height: 300px; }
+.history-dashboard .protocol-panel { grid-column: span 12; height: 320px; }
+.history-dashboard .malware-history-panel { grid-column: span 12; min-height: 420px; }
 
 .callouts {
   display: grid;
@@ -908,20 +925,81 @@ body.has-max .max-backdrop { display: block; }
 .history-charts {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-template-rows: 220px auto;
+  align-content: start;
   gap: 10px;
   flex: 1; min-height: 0; padding: 8px;
 }
+.history-charts .heatmap-box { grid-column: 1 / -1; }
 
 .stat-box { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .stat-label {
   font-family: var(--font-display);
   font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase;
   color: var(--muted); padding: 8px 12px 0;
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.stat-hint {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.2px;
+  text-transform: none; color: var(--faint);
 }
 
 .protocol-grid { display: flex; gap: 10px; flex: 1; min-height: 0; padding: 8px; }
 .protocol-grid .stat-box { flex: 1; }
 .protocol-grid .stat-box--donut { flex: 0 0 240px; }
+.protocol-grid #ispsBox { flex: 0 0 340px; }
+.protocol-grid #ispsBox .country-list { padding: 6px 4px; }
+
+/* day x hour heatmap */
+.heatmap-wrap { flex: 1; min-height: 0; padding: 4px 12px 10px; overflow: auto; }
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: 34px repeat(24, minmax(14px, 1fr));
+  grid-auto-rows: 16px;
+  gap: 2px;
+  min-width: 480px;
+}
+.hm-corner { }
+.hm-hour-label {
+  font-size: 8px; color: var(--faint); text-align: center; align-self: end;
+}
+.hm-day-label {
+  font-size: 9px; color: var(--muted); display: flex; align-items: center;
+}
+.hm-cell {
+  border-radius: 2px;
+  transition: opacity 0.2s ease;
+  cursor: default;
+}
+.hm-cell--dim { opacity: 0.15; }
+
+/* country / isp cross-filter rows */
+.crow--clickable { cursor: pointer; transition: background 0.15s ease; border-radius: 4px; }
+.crow--clickable:hover { background: rgba(56, 215, 240, 0.06); }
+.crow--active { background: rgba(56, 215, 240, 0.1); outline: 1px solid rgba(56, 215, 240, 0.35); }
+.country-list--compact { gap: 6px; }
+.flag--none { display: inline-block; width: 22px; height: 16px; margin-right: 2px; }
+
+/* malware / threat-intel history panel */
+.malware-history-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.malware-summary {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  padding: 12px;
+}
+.mw-summary-card {
+  flex: 1 1 160px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(14, 23, 33, 0.6), rgba(10, 17, 26, 0.4));
+}
+.mw-summary-card--total { border-color: rgba(255, 178, 36, 0.35); }
+.mw-summary-label {
+  font-family: var(--font-display); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--muted);
+}
+.mw-summary-value { font-size: 18px; font-weight: 700; color: var(--amber); margin-top: 4px; }
+.mw-summary-sub { font-size: 10px; color: var(--muted); margin-top: 3px; }
 
 /* ------------------------------------------------------------- *
  *  Responsive
@@ -947,16 +1025,18 @@ body.has-max .max-backdrop { display: block; }
   .history-dashboard .pattern-panel,
   .history-dashboard .attackers-panel,
   .history-dashboard .country-panel,
-  .history-dashboard .protocol-panel {
+  .history-dashboard .protocol-panel,
+  .history-dashboard .malware-history-panel {
     grid-column: span 1;
     height: auto;
   }
   .history-dashboard .attackers-panel { height: 320px; }
   .history-dashboard .country-panel { height: 280px; }
-  .history-dashboard .pattern-panel { height: 420px; }
-  .history-dashboard .protocol-panel { height: 620px; }
-  .history-charts { grid-template-columns: 1fr; }
+  .history-dashboard .protocol-panel { height: 820px; }
+  .history-charts { grid-template-columns: 1fr; grid-template-rows: 220px 220px auto; }
   .protocol-grid { flex-direction: column; }
   .protocol-grid .stat-box--donut { flex: 0 0 200px; }
+  .protocol-grid #ispsBox { flex: 0 0 240px; }
+  .history-rangebar { flex-wrap: wrap; }
 }
 

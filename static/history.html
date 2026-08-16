@@ -31,6 +31,11 @@
     </div>
   </header>
 
+  <div class="history-rangebar" id="rangeBar">
+    <span class="range-label">DATA RANGE</span>
+    <span class="range-value" id="rangeValue">loading…</span>
+  </div>
+
   <main class="dashboard history-dashboard">
     <section class="panel narrative-panel">
       <div class="panel-head">
@@ -45,16 +50,23 @@
     <section class="panel pattern-panel">
       <div class="panel-head">
         <span class="panel-title">ACTIVITY PATTERNS</span>
-        <span class="panel-sub">WHEN ATTACKS HAPPEN</span>
+        <span class="panel-sub" id="patternSub">WHEN ATTACKS HAPPEN</span>
       </div>
       <div class="history-charts">
         <div class="stat-box">
-          <div class="stat-label">ACTIVITY BY HOUR (UTC)</div>
+          <div class="stat-label">ACTIVITY BY HOUR (UTC) <span class="stat-hint">click a bar to cross-filter</span></div>
           <div class="chart-wrap" id="hourChartWrap"><canvas id="historyHourChart"></canvas></div>
         </div>
         <div class="stat-box">
-          <div class="stat-label">ACTIVITY BY DAY OF WEEK</div>
+          <div class="stat-label">ACTIVITY BY DAY OF WEEK <span class="stat-hint" id="dowHint">summed across the full range above</span></div>
           <div class="chart-wrap" id="dowChartWrap"><canvas id="historyDowChart"></canvas></div>
+        </div>
+        <div class="stat-box heatmap-box">
+          <div class="stat-label">
+            DAY × HOUR HEATMAP <span class="stat-hint">click hour/day bars to highlight</span>
+            <button class="chip" id="clearPatternBtn" style="display:none">clear highlight</button>
+          </div>
+          <div class="heatmap-wrap" id="heatmapWrap"></div>
         </div>
       </div>
     </section>
@@ -80,7 +92,7 @@
     <section class="panel country-panel">
       <div class="panel-head">
         <span class="panel-title">COUNTRY / CITY DETAIL</span>
-        <span class="panel-sub">TOP ORIGINS</span>
+        <span class="panel-sub">CLICK TO FILTER ATTACKERS</span>
       </div>
       <div class="country-list" id="countryCities">
         <div class="country-empty">loading history…</div>
@@ -90,20 +102,40 @@
     <section class="panel protocol-panel">
       <div class="panel-head">
         <span class="panel-title">BREAKDOWNS</span>
-        <span class="panel-sub">PROTOCOLS · PORTS · DURATION</span>
+        <span class="panel-sub">PROTOCOLS · NETWORKS · DURATION</span>
       </div>
       <div class="protocol-grid">
         <div class="stat-box stat-box--donut" id="protocolBox">
           <div class="stat-label">PROTOCOL SPLIT</div>
           <div class="chart-wrap chart-wrap--donut" id="protocolChartWrap"><canvas id="historyProtocolChart"></canvas></div>
         </div>
-        <div class="stat-box" id="portsBox">
-          <div class="stat-label">TOP ATTACKER SOURCE PORTS</div>
-          <div class="chart-wrap" id="portsChartWrap"><canvas id="historyPortsChart"></canvas></div>
+        <div class="stat-box" id="ispsBox">
+          <div class="stat-label">TOP ATTACKING NETWORKS (ISP) <span class="stat-hint">click to filter attackers</span></div>
+          <div class="country-list country-list--compact" id="ispList"></div>
         </div>
         <div class="stat-box" id="durationBox">
           <div class="stat-label">SESSION DURATION</div>
           <div class="chart-wrap" id="durationChartWrap"><canvas id="historyDurationChart"></canvas></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel malware-history-panel" id="malwareHistoryPanel">
+      <div class="panel-head">
+        <span class="panel-title">MALWARE &amp; THREAT INTEL</span>
+        <span class="panel-sub" id="malwareHistorySub">—</span>
+      </div>
+      <div class="malware-history-body">
+        <div class="malware-summary" id="malwareSummary"></div>
+        <div class="table-scroll">
+          <table class="sessions-table malware-table">
+            <thead>
+              <tr>
+                <th>Last Seen</th><th>Hash / URL</th><th>Downloads</th><th>Sources</th><th>Reports</th>
+              </tr>
+            </thead>
+            <tbody id="malwareHistoryBody"></tbody>
+          </table>
         </div>
       </div>
     </section>

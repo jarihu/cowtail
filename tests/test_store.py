@@ -4,7 +4,7 @@
 
 import gzip
 
-from cowtail.store import HistoryStore, normalize, parse_file, to_epoch
+from cowtail.store import HistoryStore, normalize, parse_file, parse_report, to_epoch
 
 
 def test_to_epoch_z():
@@ -440,6 +440,27 @@ def test_insights_attackers(tmp_path):
     assert by_ip["1.2.3.4"]["country_code"] == "US"
     assert by_ip["1.2.3.4"]["firstTs"] == to_epoch("2026-08-10T10:00:00Z")
     assert by_ip["1.2.3.4"]["lastTs"] == to_epoch("2026-08-13T14:00:00Z")
+    # topAttackerIps spans the whole matched range, not a curated top-N —
+    # totalAttackerIps should match the actual distinct-IP count and, with
+    # only 3 distinct IPs in the seed data, nothing should be truncated.
+    assert d["totalAttackerIps"] == 3
+    assert len(tops) == d["totalAttackerIps"]
+    store.close()
+
+
+def test_insights_attackers_ceiling_is_reported(tmp_path):
+    # Cheaper than seeding 5000+ distinct IPs to actually hit the ceiling:
+    # assert the reported total always tracks the true distinct-IP count
+    # (below the ceiling here, so nothing should be truncated).
+    store = HistoryStore(tmp_path / "hist.db")
+    rows = [
+        _insight_row(f"c{i}", 10, 10, "cowrie.session.connect", f"10.0.{i // 250}.{i % 250}", f"a{i}")
+        for i in range(10)
+    ]
+    store.insert_events(rows)
+    d = store.insights(None, None)
+    assert d["totalAttackerIps"] == 10
+    assert len(d["topAttackerIps"]) == 10
     store.close()
 
 
@@ -511,4 +532,126 @@ def test_insights_empty(tmp_path):
     assert d["topAttackerIps"] == []
     assert d["countryCities"] == {}
     assert "sessionDuration" not in d
+    assert d["topIsps"] == []
+    assert d["malware"] == {
+        "totalSamples": 0,
+        "reportedSamples": 0,
+        "maliciousSamples": 0,
+        "byService": [],
+        "topMalware": [],
+    }
+    store.close()
+
+
+def test_parse_report_virustotal_malicious():
+    ev = {
+        "eventid": "cowrie.virustotal.scanfile",
+        "sha256": "a" * 64,
+        "positives": 5,
+        "total": 70,
+        "permalink": "https://vt/x",
+        "timestamp": "2026-08-15T10:00:00Z",
+    }
+    row = parse_report(ev)
+    assert row is not None
+    ts, service, kind, sha256, shasum, url, positives, total, verdict, permalink, ip = row
+    assert service == "virustotal"
+    assert kind == "file"
+    assert sha256 == "a" * 64
+    assert positives == 5
+    assert total == 70
+    assert verdict == "malicious"
+    assert permalink == "https://vt/x"
+
+
+def test_parse_report_generic_url_service():
+    ev = {
+        "eventid": "cowrie.urlhaus.lookup",
+        "url": "http://evil.example/x.sh",
+        "malicious": True,
+        "timestamp": "2026-08-15T10:00:00Z",
+    }
+    row = parse_report(ev)
+    assert row is not None
+    assert row[1] == "urlhaus"
+    assert row[2] == "url"
+    assert row[8] == "malicious"
+
+
+def test_parse_report_clean_and_pending():
+    clean = parse_report(
+        {
+            "eventid": "cowrie.virustotal.scanfile",
+            "sha256": "b" * 64,
+            "positives": 0,
+            "total": 70,
+            "timestamp": "2026-08-15T10:00:00Z",
+        }
+    )
+    assert clean[8] == "clean"
+    pending = parse_report(
+        {
+            "eventid": "cowrie.virustotal.scanfile",
+            "sha256": "c" * 64,
+            "is_new": "true",
+            "timestamp": "2026-08-15T10:00:00Z",
+        }
+    )
+    assert pending[8] == "pending"
+
+
+def test_parse_report_ignores_non_report_events():
+    assert parse_report({"eventid": "cowrie.session.connect", "timestamp": "2026-08-15T10:00:00Z"}) is None
+    assert parse_report({"eventid": "cowrie.login.failed", "timestamp": "2026-08-15T10:00:00Z"}) is None
+    assert parse_report({"eventid": "not-cowrie.virustotal.scanfile"}) is None
+    assert parse_report({}) is None
+
+
+def test_parse_file_extracts_reports(tmp_path):
+    p = tmp_path / "cowrie.json.1"
+    p.write_text(
+        '{"eventid":"cowrie.session.file_download","src_ip":"1.2.3.4","shasum":"'
+        + ("a" * 64)
+        + '","url":"http://evil.example/x.sh","timestamp":"2026-08-15T10:00:00Z"}\n'
+        '{"eventid":"cowrie.virustotal.scanfile","sha256":"'
+        + ("a" * 64)
+        + '","positives":3,"total":70,"timestamp":"2026-08-15T10:01:00Z"}\n'
+        '{"eventid":"cowrie.session.connect","src_ip":"1.2.3.4","timestamp":"2026-08-15T10:02:00Z"}\n',
+        encoding="utf-8",
+    )
+    batches, reports, ips = [], [], set()
+    count = parse_file(p, batches.append, ips.add, reports.append)
+    assert count == 3
+    assert sum(len(b) for b in reports) == 1
+    assert reports[0][0][2] == "virustotal"
+
+
+def test_ingest_file_persists_reports_and_malware_insights(tmp_path):
+    p = tmp_path / "cowrie.json.1"
+    p.write_text(
+        '{"eventid":"cowrie.session.file_download","src_ip":"1.2.3.4","shasum":"'
+        + ("a" * 64)
+        + '","url":"http://evil.example/x.sh","timestamp":"2026-08-15T10:00:00Z"}\n'
+        '{"eventid":"cowrie.virustotal.scanfile","sha256":"'
+        + ("a" * 64)
+        + '","positives":5,"total":70,"permalink":"https://vt/x","timestamp":"2026-08-15T10:01:00Z"}\n'
+        '{"eventid":"cowrie.urlhaus.lookup","url":"http://evil.example/x.sh","malicious":true,'
+        '"timestamp":"2026-08-15T10:02:00Z"}\n',
+        encoding="utf-8",
+    )
+    store = HistoryStore(tmp_path / "hist.db")
+    count = store.ingest_file(p, lambda ip: None)
+    assert count == 3
+    d = store.insights(None, None)
+    mw = d["malware"]
+    assert mw["totalSamples"] == 1
+    assert mw["reportedSamples"] == 2
+    assert mw["maliciousSamples"] == 2
+    assert {s[0]: s[1] for s in mw["byService"]} == {"virustotal": 1, "urlhaus": 1}
+    assert len(mw["topMalware"]) == 1
+    top = mw["topMalware"][0]
+    assert top["shasum"] == "a" * 64
+    services = {r["service"] for r in top["reports"]}
+    assert services == {"virustotal", "urlhaus"}
+    assert all(r["verdict"] == "malicious" for r in top["reports"])
     store.close()

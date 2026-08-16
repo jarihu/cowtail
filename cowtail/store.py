@@ -17,7 +17,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -59,7 +59,36 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_events_src_ip ON events(src_ip);
 CREATE INDEX IF NOT EXISTS idx_events_eventid ON events(eventid);
+CREATE TABLE IF NOT EXISTS reports (
+    row_hash TEXT NOT NULL UNIQUE,
+    ts INTEGER NOT NULL,
+    service TEXT NOT NULL,
+    kind TEXT,
+    sha256 TEXT,
+    shasum TEXT,
+    url TEXT,
+    positives INTEGER,
+    total INTEGER,
+    verdict TEXT,
+    permalink TEXT,
+    src_ip TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_reports_ts ON reports(ts);
+CREATE INDEX IF NOT EXISTS idx_reports_sha256 ON reports(sha256);
+CREATE INDEX IF NOT EXISTS idx_reports_shasum ON reports(shasum);
+CREATE INDEX IF NOT EXISTS idx_reports_url ON reports(url);
 """
+
+# topAttackerIps is meant to span the entire matched range (this is a
+# history view), not a curated top-N. This is a safety ceiling against a
+# pathologically large distinct-IP count blowing up the JSON payload/DOM
+# table, not a deliberate cutoff — HistoryStore.insights() also reports the
+# true `totalAttackerIps` count so callers can tell when it was actually hit.
+ATTACKER_ROWS_CEILING = 5000
+
+# Same rationale as ATTACKER_ROWS_CEILING, applied to topMalware in
+# HistoryStore._malware_insights() — a safety net, not a curated top-N.
+MALWARE_ROWS_CEILING = 2000
 
 EVENT_COLUMNS = (
     "row_hash",
@@ -77,6 +106,29 @@ EVENT_COLUMNS = (
     "sha256",
     "duration_ms",
 )
+
+REPORT_COLUMNS = (
+    "row_hash",
+    "ts",
+    "service",
+    "kind",
+    "sha256",
+    "shasum",
+    "url",
+    "positives",
+    "total",
+    "verdict",
+    "permalink",
+    "src_ip",
+)
+
+# Cowrie's output plugins that check files/URLs against a 3rd-party threat
+# intel service all follow the "cowrie.<service>.<action>" naming convention
+# (e.g. cowrie.virustotal.scanfile). Any plugin whose action looks like a
+# lookup/report is treated as a malware-intel report, so community plugins
+# for urlhaus, malshare, hybrid-analysis, etc. are picked up without needing
+# per-service code.
+REPORT_ACTION_HINTS = ("scan", "report", "lookup", "check", "query")
 
 
 def to_epoch(ts: str) -> int | None:
@@ -113,6 +165,67 @@ def normalize(ev: dict) -> tuple | None:
     )
 
 
+def parse_report(ev: dict) -> tuple | None:
+    """Recognize a malware/URL threat-intel report event and normalize it.
+
+    Covers VirusTotal (cowrie's built-in output plugin) as well as any other
+    ``cowrie.<service>.<scan|report|lookup|check|query>`` event a custom
+    output plugin (urlhaus, malshare, hybrid-analysis, ...) might emit.
+    """
+    eventid = ev.get("eventid") or ""
+    parts = eventid.split(".")
+    if len(parts) < 3 or parts[0] != "cowrie":
+        return None
+    service, action = parts[1], parts[2]
+    if not any(hint in action.lower() for hint in REPORT_ACTION_HINTS):
+        return None
+
+    ts = to_epoch(ev.get("timestamp"))
+    if ts is None:
+        return None
+
+    sha256 = ev.get("sha256") or None
+    shasum = ev.get("shasum") or (sha256 if sha256 else None)
+    sha256 = sha256 or shasum
+    url = ev.get("url") or None
+    kind = "file" if (sha256 or shasum) else ("url" if url else None)
+    if kind is None:
+        return None
+
+    positives = ev.get("positives")
+    if not isinstance(positives, int):
+        positives = None
+    total = ev.get("total")
+    if not isinstance(total, int):
+        total = None
+
+    malicious = ev.get("malicious")
+    if positives is not None:
+        verdict = "malicious" if positives > 0 else "clean"
+    elif isinstance(malicious, bool):
+        verdict = "malicious" if malicious else "clean"
+    elif str(ev.get("is_new", "")).lower() == "true":
+        verdict = "pending"
+    else:
+        verdict = "unknown"
+
+    permalink = ev.get("permalink") or ev.get("link") or ev.get("report_url")
+
+    return (
+        ts,
+        service,
+        kind,
+        sha256,
+        shasum,
+        url,
+        positives,
+        total,
+        verdict,
+        permalink,
+        ev.get("src_ip"),
+    )
+
+
 def iter_lines(path: Path):
     if path.name.endswith(".gz"):
         import gzip
@@ -121,9 +234,10 @@ def iter_lines(path: Path):
     return open(path, "r", encoding="utf-8", errors="replace")
 
 
-def parse_file(path: Path, on_batch, on_ip) -> int:
+def parse_file(path: Path, on_batch, on_ip, on_report_batch=None) -> int:
     count = 0
     batch = []
+    report_batch = []
     with iter_lines(path) as fh:
         for line in fh:
             line = line.strip()
@@ -142,11 +256,20 @@ def parse_file(path: Path, on_batch, on_ip) -> int:
             ip = ev.get("src_ip")
             if ip:
                 on_ip(ip)
+            if on_report_batch is not None:
+                report = parse_report(ev)
+                if report is not None:
+                    report_batch.append((row_hash,) + report)
+                    if len(report_batch) >= 5000:
+                        on_report_batch(report_batch)
+                        report_batch = []
             if len(batch) >= 5000:
                 on_batch(batch)
                 batch = []
     if batch:
         on_batch(batch)
+    if report_batch and on_report_batch is not None:
+        on_report_batch(report_batch)
     return count
 
 
@@ -199,9 +322,23 @@ class HistoryStore:
         with self._guard:
             self._insert_batch(rows)
 
+    def _insert_reports_batch(self, rows: list[tuple]) -> None:
+        self._conn.executemany(
+            f"INSERT OR IGNORE INTO reports({','.join(REPORT_COLUMNS)})"
+            f" VALUES({','.join('?' * len(REPORT_COLUMNS))})",
+            rows,
+        )
+        self._conn.commit()
+
+    def insert_reports(self, rows: list[tuple]) -> None:
+        with self._guard:
+            self._insert_reports_batch(rows)
+
     def ingest_file(self, path: Path, on_ip) -> int:
         with self._guard:
-            count = parse_file(path, self._insert_batch, on_ip)
+            count = parse_file(
+                path, self._insert_batch, on_ip, self._insert_reports_batch
+            )
             self._conn.commit()
         return count
 
@@ -296,35 +433,6 @@ class HistoryStore:
             [r[0], r[1], country_names.get(r[0], r[0])] for r in country_rows
         ]
 
-        def top_isps():
-            rows = [
-                list(r)
-                for r in self._conn.execute(
-                    f"SELECT i.isp AS v, COUNT(DISTINCT e.src_ip) AS c FROM events e"
-                    f" JOIN ips i ON i.ip = e.src_ip WHERE {base}"
-                    f" AND i.isp IS NOT NULL AND i.isp != ''"
-                    f" GROUP BY v ORDER BY c DESC LIMIT ?",
-                    args + [14],
-                ).fetchall()
-            ]
-            if not rows:
-                return rows
-            names = [r[0] for r in rows]
-            best = {}
-            for isp, code, cnt in self._conn.execute(
-                "SELECT i.isp, i.country_code, COUNT(DISTINCT e.src_ip) AS c"
-                " FROM events e JOIN ips i ON i.ip = e.src_ip"
-                f" WHERE {base} AND i.isp IN ({','.join('?' * len(names))})"
-                " AND i.country_code IS NOT NULL AND i.country_code != ''"
-                " GROUP BY i.isp, i.country_code",
-                args + names,
-            ).fetchall():
-                if isp not in best or cnt > best[isp][1]:
-                    best[isp] = (code, cnt)
-            for r in rows:
-                r.append(best.get(r[0], (None, 0))[0])
-            return rows
-
         return {
             "minTs": self._conn.execute(
                 f"SELECT MIN(e.ts) FROM events e WHERE {base}", args
@@ -338,8 +446,37 @@ class HistoryStore:
             "topPasswords": top("e.password"),
             "topCommands": top("e.input"),
             "topCountries": top_countries,
-            "topIsps": top_isps(),
+            "topIsps": self._top_isps(base, args),
         }
+
+    def _top_isps(self, base: str, args: list, limit: int = 14) -> list:
+        rows = [
+            list(r)
+            for r in self._conn.execute(
+                f"SELECT i.isp AS v, COUNT(DISTINCT e.src_ip) AS c FROM events e"
+                f" JOIN ips i ON i.ip = e.src_ip WHERE {base}"
+                f" AND i.isp IS NOT NULL AND i.isp != ''"
+                f" GROUP BY v ORDER BY c DESC LIMIT ?",
+                args + [limit],
+            ).fetchall()
+        ]
+        if not rows:
+            return rows
+        names = [r[0] for r in rows]
+        best = {}
+        for isp, code, cnt in self._conn.execute(
+            "SELECT i.isp, i.country_code, COUNT(DISTINCT e.src_ip) AS c"
+            " FROM events e JOIN ips i ON i.ip = e.src_ip"
+            f" WHERE {base} AND i.isp IN ({','.join('?' * len(names))})"
+            " AND i.country_code IS NOT NULL AND i.country_code != ''"
+            " GROUP BY i.isp, i.country_code",
+            args + names,
+        ).fetchall():
+            if isp not in best or cnt > best[isp][1]:
+                best[isp] = (code, cnt)
+        for r in rows:
+            r.append(best.get(r[0], (None, 0))[0])
+        return rows
 
     def insights(self, from_ts: int | None, to_ts: int | None) -> dict:
         with self._guard:
@@ -409,6 +546,12 @@ class HistoryStore:
         ).fetchall()
         heatmap = [[int(dow), int(hr), c] for dow, hr, c in heat_rows]
 
+        total_attacker_ips = self._conn.execute(
+            f"SELECT COUNT(DISTINCT e.src_ip) FROM events e"
+            f" WHERE {base} AND e.src_ip IS NOT NULL AND e.src_ip != ''",
+            args,
+        ).fetchone()[0]
+
         top_rows = self._conn.execute(
             f"SELECT e.src_ip, COUNT(*) AS c, MIN(e.ts) AS first_ts,"
             f" MAX(e.ts) AS last_ts,"
@@ -419,8 +562,8 @@ class HistoryStore:
             f" ('cowrie.command.input','cowrie.command.failed') THEN 1 ELSE 0 END)"
             f" AS commands"
             f" FROM events e WHERE {base} AND e.src_ip IS NOT NULL AND e.src_ip != ''"
-            f" GROUP BY e.src_ip ORDER BY c DESC LIMIT 20",
-            args,
+            f" GROUP BY e.src_ip ORDER BY c DESC LIMIT ?",
+            args + [ATTACKER_ROWS_CEILING],
         ).fetchall()
         top_ips: list[dict] = []
         if top_rows:
@@ -496,6 +639,8 @@ class HistoryStore:
             ).fetchall()
         ]
 
+        malware = self._malware_insights(base, args, from_ts, to_ts)
+
         result = {
             "minTs": min_ts,
             "maxTs": max_ts,
@@ -511,9 +656,12 @@ class HistoryStore:
                 "heatmap": heatmap,
             },
             "topAttackerIps": top_ips,
+            "totalAttackerIps": total_attacker_ips,
             "countryCities": country_cities,
             "protocols": protocols,
             "topSourcePorts": top_source_ports,
+            "topIsps": self._top_isps(base, args),
+            "malware": malware,
         }
 
         if len(dur_values) >= 3:
@@ -533,6 +681,124 @@ class HistoryStore:
             result["sessionDuration"] = {"buckets": labels, "counts": counts}
 
         return result
+
+    def _malware_insights(
+        self, base: str, args: list, from_ts: int | None, to_ts: int | None
+    ) -> dict:
+        rconds = ["1=1"]
+        rargs: list = []
+        if from_ts is not None:
+            rconds.append("r.ts >= ?")
+            rargs.append(from_ts)
+        if to_ts is not None:
+            rconds.append("r.ts <= ?")
+            rargs.append(to_ts)
+        rbase = " AND ".join(rconds)
+
+        total_samples = self._conn.execute(
+            f"SELECT COUNT(DISTINCT e.shasum) FROM events e WHERE {base}"
+            f" AND e.eventid = 'cowrie.session.file_download'"
+            f" AND e.shasum IS NOT NULL AND e.shasum != ''",
+            args,
+        ).fetchone()[0]
+
+        reported_samples = self._conn.execute(
+            f"SELECT COUNT(DISTINCT COALESCE(r.sha256, r.shasum, r.url))"
+            f" FROM reports r WHERE {rbase}",
+            rargs,
+        ).fetchone()[0]
+
+        malicious_samples = self._conn.execute(
+            f"SELECT COUNT(DISTINCT COALESCE(r.sha256, r.shasum, r.url))"
+            f" FROM reports r WHERE {rbase} AND r.verdict = 'malicious'",
+            rargs,
+        ).fetchone()[0]
+
+        by_service = [
+            [service, n, mal or 0]
+            for service, n, mal in self._conn.execute(
+                f"SELECT r.service, COUNT(*) AS n,"
+                f" SUM(CASE WHEN r.verdict = 'malicious' THEN 1 ELSE 0 END) AS mal"
+                f" FROM reports r WHERE {rbase} GROUP BY r.service ORDER BY n DESC",
+                rargs,
+            ).fetchall()
+        ]
+
+        # Like topAttackerIps, this is meant to span every downloaded sample
+        # in the matched range, not a curated top-N — `totalSamples` (above)
+        # is the true count, so a row limit here would silently understate
+        # it. MALWARE_ROWS_CEILING is only a payload-size safety net.
+        dl_rows = self._conn.execute(
+            f"SELECT e.shasum, e.url, COUNT(*) AS c, MIN(e.ts), MAX(e.ts),"
+            f" COUNT(DISTINCT e.src_ip)"
+            f" FROM events e WHERE {base}"
+            f" AND e.eventid = 'cowrie.session.file_download'"
+            f" AND e.shasum IS NOT NULL AND e.shasum != ''"
+            f" GROUP BY e.shasum ORDER BY c DESC LIMIT ?",
+            args + [MALWARE_ROWS_CEILING],
+        ).fetchall()
+
+        top_malware: list[dict] = []
+        if dl_rows:
+            hashes = [r[0] for r in dl_rows]
+            urls = sorted({r[1] for r in dl_rows if r[1]})
+            reports_by_hash: dict[str, list] = {}
+            reports_by_url: dict[str, list] = {}
+
+            def collect(rows, target):
+                for key, service, positives, total, verdict, permalink in rows:
+                    target.setdefault(key, []).append(
+                        {
+                            "service": service,
+                            "positives": positives,
+                            "total": total,
+                            "verdict": verdict,
+                            "permalink": permalink,
+                        }
+                    )
+
+            hash_q = (
+                f"SELECT COALESCE(r.sha256, r.shasum) AS h, r.service, r.positives,"
+                f" r.total, r.verdict, r.permalink FROM reports r"
+                f" WHERE {rbase} AND COALESCE(r.sha256, r.shasum) IN"
+                f" ({','.join('?' * len(hashes))})"
+            )
+            collect(self._conn.execute(hash_q, rargs + hashes).fetchall(), reports_by_hash)
+
+            if urls:
+                url_q = (
+                    f"SELECT r.url, r.service, r.positives, r.total, r.verdict,"
+                    f" r.permalink FROM reports r"
+                    f" WHERE {rbase} AND r.url IN ({','.join('?' * len(urls))})"
+                )
+                collect(self._conn.execute(url_q, rargs + urls).fetchall(), reports_by_url)
+
+            for shasum, url, c, first_ts, last_ts, ip_count in dl_rows:
+                reports = list(reports_by_hash.get(shasum, []))
+                seen_services = {r["service"] for r in reports}
+                for r in reports_by_url.get(url, []):
+                    if r["service"] not in seen_services:
+                        reports.append(r)
+                        seen_services.add(r["service"])
+                top_malware.append(
+                    {
+                        "shasum": shasum,
+                        "url": url,
+                        "count": c,
+                        "firstTs": first_ts,
+                        "lastTs": last_ts,
+                        "ipCount": ip_count,
+                        "reports": reports,
+                    }
+                )
+
+        return {
+            "totalSamples": total_samples,
+            "reportedSamples": reported_samples,
+            "maliciousSamples": malicious_samples,
+            "byService": by_service,
+            "topMalware": top_malware,
+        }
 
     def _timeline(self, base: str, args: list, buckets: int) -> dict:
         if buckets <= 0:

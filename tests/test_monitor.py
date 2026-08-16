@@ -182,9 +182,72 @@ async def test_history_insights_endpoint(tmp_path):
     assert len(data["topAttackerIps"]) == 1
     assert data["topAttackerIps"][0]["ip"] == "10.0.0.1"
     assert data["topAttackerIps"][0]["logins"] == 1
+    assert data["totalAttackerIps"] == 1
     assert data["protocols"] == [["ssh", 1]]
     assert data["topSourcePorts"] == [[4432, 1]]
     assert "sessionDuration" not in data
+    await client.close()
+    m.store.close()
+    await m.resolver.close()
+
+
+async def test_history_insights_cached_between_requests(tmp_path):
+    (tmp_path / "cowrie.json.1").write_text(
+        '{"eventid":"cowrie.session.connect","session":"a1","src_ip":"10.0.0.1","protocol":"ssh","timestamp":"2026-08-15T10:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    m = CowrieMonitor(
+        log_path=tmp_path / "cowrie.json", demo=False, db_path=str(tmp_path / "hist.db")
+    )
+    assert await m.ingest_rotated() == 1
+
+    server = TestServer(m.build_app())
+    client = TestClient(server)
+    await client.start_server()
+
+    resp1 = await client.get("/api/history")
+    data1 = await resp1.json()
+    assert (None, None) in m._insights_cache
+
+    # a second rotated file with no new events shouldn't touch the cache
+    assert await m.ingest_rotated() == 0
+    assert (None, None) in m._insights_cache
+
+    resp2 = await client.get("/api/history")
+    data2 = await resp2.json()
+    assert data1 == data2
+
+    # writing + ingesting a genuinely new rotated file invalidates it
+    (tmp_path / "cowrie.json.2").write_text(
+        '{"eventid":"cowrie.session.connect","session":"a2","src_ip":"10.0.0.2","protocol":"ssh","timestamp":"2026-08-16T11:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    assert await m.ingest_rotated() == 1
+    assert m._insights_cache == {}
+
+    resp3 = await client.get("/api/history")
+    data3 = await resp3.json()
+    assert len(data3["topAttackerIps"]) == 2
+
+    await client.close()
+    m.store.close()
+    await m.resolver.close()
+
+
+async def test_stats_endpoint_cached_between_requests(tmp_path):
+    (tmp_path / "cowrie.json.1").write_text(
+        '{"eventid":"cowrie.session.connect","session":"a1","src_ip":"10.0.0.1","protocol":"ssh","timestamp":"2026-08-15T10:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    m = CowrieMonitor(
+        log_path=tmp_path / "cowrie.json", demo=False, db_path=str(tmp_path / "hist.db")
+    )
+    await m.ingest_rotated()
+    server = TestServer(m.build_app())
+    client = TestClient(server)
+    await client.start_server()
+    await client.get("/api/stats?buckets=40")
+    assert (None, None, 40) in m._stats_cache
     await client.close()
     m.store.close()
     await m.resolver.close()
@@ -203,6 +266,7 @@ async def test_history_insights_empty_in_demo(tmp_path):
     assert data["activity"]["hourOfDay"] == [0] * 24
     assert data["activity"]["dayOfWeek"] == [0] * 7
     assert data["topAttackerIps"] == []
+    assert data["totalAttackerIps"] == 0
     await client.close()
     await m.resolver.close()
 

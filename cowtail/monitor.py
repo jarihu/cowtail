@@ -62,6 +62,13 @@ class CowrieMonitor:
         self._ingest_lock = asyncio.Lock()
         self._ingest_geo_sem = asyncio.Semaphore(8)
 
+        # /api/stats and /api/history recompute a couple dozen SQL queries
+        # over the whole matched range — cheap once, wasteful on every page
+        # load. Cache by request params and drop the cache wholesale whenever
+        # ingest_rotated() actually pulls in new rows.
+        self._stats_cache: dict[tuple, dict] = {}
+        self._insights_cache: dict[tuple, dict] = {}
+
         self.honeypot = {
             "lat": float(os.environ.get("HONEYPOT_LAT", "52.3676")),
             "lng": float(os.environ.get("HONEYPOT_LNG", "4.9041")),
@@ -195,6 +202,9 @@ class CowrieMonitor:
             total = 0
             for path in self.discover_rotated():
                 total += await self._ingest_file(path)
+            if total:
+                self._stats_cache.clear()
+                self._insights_cache.clear()
             return total
 
     async def _ingest_file(self, path: Path) -> int:
@@ -351,7 +361,11 @@ class CowrieMonitor:
             buckets = 40
         buckets = max(1, min(buckets, 500))
 
-        data = await asyncio.to_thread(self.store.stats, from_ts, to_ts, buckets)
+        cache_key = (from_ts, to_ts, buckets)
+        data = self._stats_cache.get(cache_key)
+        if data is None:
+            data = await asyncio.to_thread(self.store.stats, from_ts, to_ts, buckets)
+            self._stats_cache[cache_key] = data
         return web.json_response(data)
 
     async def api_history_insights(self, request: web.Request) -> web.Response:
@@ -370,9 +384,18 @@ class CowrieMonitor:
                 "heatmap": [],
             },
             "topAttackerIps": [],
+            "totalAttackerIps": 0,
             "countryCities": {},
             "protocols": [],
             "topSourcePorts": [],
+            "topIsps": [],
+            "malware": {
+                "totalSamples": 0,
+                "reportedSamples": 0,
+                "maliciousSamples": 0,
+                "byService": [],
+                "topMalware": [],
+            },
         }
         if self.store is None:
             return web.json_response(empty)
@@ -382,7 +405,11 @@ class CowrieMonitor:
         )
         to_ts = to_epoch(request.query.get("to")) if request.query.get("to") else None
 
-        data = await asyncio.to_thread(self.store.insights, from_ts, to_ts)
+        cache_key = (from_ts, to_ts)
+        data = self._insights_cache.get(cache_key)
+        if data is None:
+            data = await asyncio.to_thread(self.store.insights, from_ts, to_ts)
+            self._insights_cache[cache_key] = data
         return web.json_response(data)
 
     def build_app(self) -> web.Application:
