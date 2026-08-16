@@ -167,6 +167,7 @@ def test_stats_tops(tmp_path):
     assert {u[0] for u in s["topUsernames"]} == {"root", "admin"}
     assert {c[0] for c in s["topCountries"]} == {"US", "DE"}
     assert {i[0] for i in s["topIsps"]} == {"ISP-A", "ISP-B"}
+    assert {i[0]: i[2] for i in s["topIsps"]} == {"ISP-A": "US", "ISP-B": "DE"}
     store.close()
 
 

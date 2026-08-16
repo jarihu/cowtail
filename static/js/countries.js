@@ -11,20 +11,33 @@ export function updateCountries() {
     const geo = state.geo.get(atk.ip);
     if (!geo) continue;
     const key = geo.country_code || geo.country || "Unknown";
-    const label = geo.country || "Unknown";
-    counts.set(key, { label, code: geo.country_code || null, n: (counts.get(key)?.n || 0) + 1 });
+    let rec = counts.get(key);
+    if (!rec) {
+      rec = { label: geo.country || "Unknown", code: geo.country_code || null, n: 0, cities: new Map() };
+      counts.set(key, rec);
+    }
+    rec.n++;
+    if (geo.city) rec.cities.set(geo.city, (rec.cities.get(geo.city) || 0) + 1);
   }
   const sorted = Array.from(counts.values()).sort((a, b) => b.n - a.n).slice(0, 14);
   const max = sorted.length ? sorted[0].n : 1;
   const list = $("#countryList");
   list.innerHTML = sorted.length
-    ? sorted.map((c) => `
+    ? sorted.map((c) => {
+        const topCity = c.cities.size
+          ? Array.from(c.cities.entries()).sort((a, b) => b[1] - a[1])[0][0]
+          : null;
+        return `
         <div class="crow">
           ${flagImg(c.code)}
-          <span class="cname">${escapeHtml(c.label)}</span>
+          <span class="cname">
+            <span class="cname-t">${escapeHtml(c.label)}</span>
+            ${topCity ? `<span class="cname-sub">${escapeHtml(topCity)}</span>` : ""}
+          </span>
           <span class="ccount">${c.n}</span>
           <span class="cbar-wrap"><span class="cbar" style="width:${(c.n / max) * 100}%"></span></span>
-        </div>`).join("")
+        </div>`;
+      }).join("")
     : '<div class="country-empty">resolving geoip…</div>';
 }
 
@@ -59,7 +72,7 @@ export function updateISPs() {
     return `
       <div class="crow">
         ${flagImg(topCC ? topCC[0] : null)}
-        <span class="cname" title="${escapeHtml(g.name)}">${escapeHtml(g.name)}</span>
+        <span class="cname"><span class="cname-t" title="${escapeHtml(g.name)}">${escapeHtml(g.name)}</span></span>
         <span class="ccount">${g.ips.size}</span>
         <span class="cbar-wrap"><span class="cbar" style="width:${(g.ips.size / max) * 100}%"></span></span>
       </div>`;
@@ -92,7 +105,7 @@ export function updateCountriesFromHistory(h) {
     ? rows.map((c) => `
         <div class="crow">
           ${flagImg(c[0])}
-          <span class="cname">${escapeHtml(c[2] || c[0])}</span>
+          <span class="cname"><span class="cname-t">${escapeHtml(c[2] || c[0])}</span></span>
           <span class="ccount">${c[1]}</span>
           <span class="cbar-wrap"><span class="cbar" style="width:${(c[1] / max) * 100}%"></span></span>
         </div>`).join("")
@@ -107,8 +120,8 @@ export function updateISPsFromHistory(h) {
   list.innerHTML = rows.length
     ? rows.map((r) => `
         <div class="crow">
-          ${flagImg(null)}
-          <span class="cname" title="${escapeHtml(r[0])}">${escapeHtml(r[0])}</span>
+          ${flagImg(r[2])}
+          <span class="cname"><span class="cname-t" title="${escapeHtml(r[0])}">${escapeHtml(r[0])}</span></span>
           <span class="ccount">${r[1]}</span>
           <span class="cbar-wrap"><span class="cbar" style="width:${(r[1] / max) * 100}%"></span></span>
         </div>`).join("")

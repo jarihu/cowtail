@@ -3,7 +3,7 @@
  * ============================================================= */
 
 import { state, filters } from "./state.js";
-import { $, escapeHtml, timeAgo, relTimeAttrs, flagImg, fmtDur, miniBar } from "./util.js";
+import { $, escapeHtml, timeAgo, relTimeAttrs, flagImg, fmtDur, miniBar, geoLocation } from "./util.js";
 
 function sessionSeverity(s) {
   const a = state.attackers.get(s.ip);
@@ -25,7 +25,7 @@ export function updateSessions() {
   if (ft.text) {
     rows = rows.filter((s) => {
       const geo = state.geo.get(s.ip);
-      const hay = `${s.ip} ${geo?.country || ""} ${s.protocol} ${s.status} ${s.credentials.join(" ")}`.toLowerCase();
+      const hay = `${s.ip} ${geoLocation(geo)} ${s.protocol} ${s.status} ${s.credentials.join(" ")}`.toLowerCase();
       return hay.includes(ft.text);
     });
   }
@@ -56,7 +56,7 @@ export function updateSessions() {
       const sev = atk ? (atk.malware ? "malware" : atk.compromised ? "compromised" : "recon") : "recon";
       return `<tr>
         <td class="ip">${sevDot(sev)}${g.ip}</td>
-        <td class="country">${flagImg(g.geo?.country_code)}${escapeHtml(g.geo?.country || "")}</td>
+        <td class="country">${flagImg(g.geo?.country_code)}${escapeHtml(geoLocation(g.geo))}</td>
         <td>${[...g.proto].map((p) => `<span class="proto-${p}">${p}</span>`).join(" / ")}</td>
         <td class="mono-dim">${g.sessions} sessions${miniBar(g.sessions, maxGSessions)}</td>
         <td class="mono-dim" ${relTimeAttrs(g.first)}>${timeAgo(g.first)}</td>
@@ -74,7 +74,7 @@ export function updateSessions() {
 
   $("#sessionsBody").innerHTML = rows.map((s) => {
     const geo = state.geo.get(s.ip);
-    const country = geo?.country || "";
+    const country = geoLocation(geo);
     const dur = s.duration != null ? fmtDur(s.duration) : "—";
     return `<tr>
       <td class="ip">${sevDot(sessionSeverity(s))}${s.ip}</td>

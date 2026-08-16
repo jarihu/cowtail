@@ -3,7 +3,7 @@
  * ============================================================= */
 
 import { state, STALE_MS } from "./state.js";
-import { escapeHtml, timeAgoFi, relTimeAttrs, flagImg } from "./util.js";
+import { escapeHtml, timeAgo, relTimeAttrs, flagImg } from "./util.js";
 
 export let map = null;
 let arcLayer = null;
@@ -76,7 +76,7 @@ function drawGraticule() {
 
 function buildTooltip(atk) {
   const geo = state.geo.get(atk.ip) || {};
-  const loc = [geo.city, geo.country].filter(Boolean).join(", ") || "Tuntematon";
+  const loc = [geo.city, geo.country].filter(Boolean).join(", ") || "Unknown";
   const protos = atk.protocols && atk.protocols.size ? [...atk.protocols].join(" / ") : "—";
   const vers = atk.versions && atk.versions.size ? [...atk.versions].slice(0, 3).join(", ") : null;
   const creds = (atk.credentials || []).slice(-4).reverse().map((c) =>
@@ -88,15 +88,15 @@ function buildTooltip(atk) {
 
   return `<div class="attack-tip">
     <div class="tip-head"><span class="tip-flag">${flagImg(geo.country_code)}</span><span class="tip-ip">${atk.ip}</span>${atk.malware ? '<span class="tip-tag">MALWARE</span>' : ""}</div>
-    <div class="tip-row"><span>Sijainti</span><b>${escapeHtml(loc)}</b></div>
-    <div class="tip-row"><span>Protokolla</span><b>${escapeHtml(protos)}</b></div>
-    <div class="tip-row"><span>Yhteyksiä</span><b>${atk.connections}</b></div>
-    <div class="tip-row"><span>Kirjautumiset</span><b><i class="ok">${atk.loginOk} onnistui</i> · <i class="fail">${atk.loginFail} epäonnistui</i></b></div>
-    <div class="tip-row"><span>Komennot</span><b>${atk.commands}</b></div>
-    ${atk.malware ? `<div class="tip-row"><span>Haittaohjelma</span><b class="fail">${malCount} näytettä</b></div>` : ""}
-    ${vers ? `<div class="tip-row"><span>SSH-versio</span><b>${escapeHtml(vers)}</b></div>` : ""}
-    ${creds ? `<div class="tip-sec">Tunnukset</div>${creds}` : ""}
-    <div class="tip-row"><span>Nähty viimeksi</span><b ${relTimeAttrs(atk.lastSeen, true)}>${timeAgoFi(atk.lastSeen)}</b></div>
+    <div class="tip-row"><span>Location</span><b>${escapeHtml(loc)}</b></div>
+    <div class="tip-row"><span>Protocol</span><b>${escapeHtml(protos)}</b></div>
+    <div class="tip-row"><span>Connections</span><b>${atk.connections}</b></div>
+    <div class="tip-row"><span>Logins</span><b><i class="ok">${atk.loginOk} succeeded</i> · <i class="fail">${atk.loginFail} failed</i></b></div>
+    <div class="tip-row"><span>Commands</span><b>${atk.commands}</b></div>
+    ${atk.malware ? `<div class="tip-row"><span>Malware</span><b class="fail">${malCount} samples</b></div>` : ""}
+    ${vers ? `<div class="tip-row"><span>SSH version</span><b>${escapeHtml(vers)}</b></div>` : ""}
+    ${creds ? `<div class="tip-sec">Credentials</div>${creds}` : ""}
+    <div class="tip-row"><span>Last seen</span><b ${relTimeAttrs(atk.lastSeen)}>${timeAgo(atk.lastSeen)}</b></div>
     ${geo.isp && geo.isp !== "SIMULATED" ? `<div class="tip-row"><span>ISP</span><b>${escapeHtml(geo.isp)}</b></div>` : ""}
   </div>`;
 }

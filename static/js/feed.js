@@ -3,7 +3,7 @@
  * ============================================================= */
 
 import { state, filters } from "./state.js";
-import { $, escapeHtml, timeAgo, relTimeAttrs, flagImg, fmtDur, shortUrl } from "./util.js";
+import { $, escapeHtml, timeAgo, relTimeAttrs, flagImg, fmtDur, shortUrl, geoLocation } from "./util.js";
 
 const feedEl = $("#feed");
 let feedCleared = false;
@@ -45,7 +45,7 @@ export function pushFeed(ev) {
   const label = EVENT_LABEL[ev.eventid] || ev.eventid.replace("cowrie.", "");
   const geo = state.geo.get(ev.src_ip);
   const geoLine = ev.src_ip
-    ? `<span class="ev-meta">${flagImg(geo?.country_code)}<span class="ip">${ev.src_ip}</span> · ${geo?.country || ""} · session ${ev.session || "?"}</span>`
+    ? `<span class="ev-meta">${flagImg(geo?.country_code)}<span class="ip">${ev.src_ip}</span> · ${escapeHtml(geoLocation(geo))} · session ${ev.session || "?"}</span>`
     : "";
 
   const node = document.createElement("div");
@@ -88,7 +88,7 @@ function buildSessionSummary(s) {
   return `<div class="ev ss">
     <span class="ev-badge ${s.status === "active" ? "connect" : "info"}">${s.status.toUpperCase()}</span>
     <span class="ev-body">
-      <div class="ss-head">${flagImg(geo?.country_code)}<span class="ip">${s.ip}</span> <span class="ss-meta">${s.protocol || "?"} · ${dur} · ${escapeHtml(geo?.country || "unknown")}</span></div>
+      <div class="ss-head">${flagImg(geo?.country_code)}<span class="ip">${s.ip}</span> <span class="ss-meta">${s.protocol || "?"} · ${dur} · ${escapeHtml(geoLocation(geo) || "unknown")}</span></div>
       ${parts.join("")}
     </span>
   </div>`;

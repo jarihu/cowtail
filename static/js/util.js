@@ -13,7 +13,7 @@ export function escapeHtml(s) {
 
 // Human-readable relative time ("32m ago") — logs routinely span 24h+, so an
 // exact HH:MM:SS is hard to place in time at a glance. The full date+time is
-// still available via the element's title attribute (see relTimeAttrs/fmtFinnish).
+// still available via the element's title attribute (see relTimeAttrs/fmtDateTime).
 export function timeAgo(iso) {
   if (!iso) return "—";
   const t = new Date(iso).getTime();
@@ -31,28 +31,11 @@ export function timeAgo(iso) {
   return future ? `in ${out}` : `${out} ago`;
 }
 
-export function timeAgoFi(iso) {
-  if (!iso) return "—";
-  const t = new Date(iso).getTime();
-  if (isNaN(t)) return "—";
-  let diff = Math.round((Date.now() - t) / 1000);
-  const future = diff < 0;
-  diff = Math.abs(diff);
-  let out;
-  if (diff < 5) return "juuri nyt";
-  else if (diff < 60) out = `${diff} s`;
-  else if (diff < 3600) out = `${Math.floor(diff / 60)} min`;
-  else if (diff < 86400) out = `${Math.floor(diff / 3600)} h`;
-  else if (diff < 604800) out = `${Math.floor(diff / 86400)} pv`;
-  else out = `${Math.floor(diff / 604800)} vk`;
-  return future ? `${out} päästä` : `${out} sitten`;
-}
-
-export function fmtFinnish(iso) {
+export function fmtDateTime(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
   if (isNaN(d)) return "—";
-  return d.toLocaleString("fi-FI", {
+  return d.toLocaleString("en-GB", {
     day: "2-digit", month: "2-digit", year: "numeric",
     hour: "2-digit", minute: "2-digit", second: "2-digit",
   });
@@ -60,21 +43,20 @@ export function fmtFinnish(iso) {
 
 export function fmtRange(ms) {
   const d = new Date(ms);
-  return d.toLocaleString("fi-FI", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleString("en-GB", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 // Attributes for a relative-time element: visible "32m ago" text plus a
 // title tooltip with the full date+time, and a data-ts hook so the periodic
 // refreshRelativeTimes() ticker can keep it fresh without a full re-render.
-export function relTimeAttrs(iso, fi) {
+export function relTimeAttrs(iso) {
   const safe = escapeHtml(iso || "");
-  return `class="rel-time${fi ? " rel-fi" : ""}" data-ts="${safe}" title="${escapeHtml(fmtFinnish(iso))}"`;
+  return `class="rel-time" data-ts="${safe}" title="${escapeHtml(fmtDateTime(iso))}"`;
 }
 
 export function refreshRelativeTimes() {
   $$(".rel-time[data-ts]").forEach((el) => {
-    const iso = el.dataset.ts;
-    el.textContent = el.classList.contains("rel-fi") ? timeAgoFi(iso) : timeAgo(iso);
+    el.textContent = timeAgo(el.dataset.ts);
   });
 }
 
@@ -90,6 +72,13 @@ export function flagImg(code) {
     return '<span class="flag flag-none"></span>';
   }
   return `<img class="flag" src="/static/vendor/flags/${c}.png" alt="" />`;
+}
+
+export function geoLocation(geo) {
+  if (!geo) return "";
+  const city = geo.city && geo.city !== "Local network" ? geo.city : "";
+  const country = geo.country || "";
+  return [city, country].filter(Boolean).join(", ");
 }
 
 export function fmtDur(ms) {

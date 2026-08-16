@@ -660,10 +660,12 @@ body {
 }
 
 .crow .flag { width: 22px; height: 16px; margin-right: 2px; }
-.crow .cname { flex: 1; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crow .cname { flex: 1; min-width: 0; color: var(--text); display: flex; flex-direction: column; justify-content: center; }
+.crow .cname-t, .crow .cname-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crow .cname-sub { color: var(--muted); font-size: 9.5px; letter-spacing: 0.2px; }
 .crow .ccount { color: var(--muted); font-weight: 600; min-width: 34px; text-align: right; }
 .crow .cbar-wrap { width: 64px; height: 4px; background: rgba(120,160,180,0.1); border-radius: 2px; overflow: hidden; }
-.crow .cbar { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--green)); border-radius: 2px; transition: width 0.5s cubic-bezier(0.2,0.8,0.2,1); }
+.crow .cbar { display: block; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--green)); border-radius: 2px; transition: width 0.5s cubic-bezier(0.2,0.8,0.2,1); }
 
 /* inline relative-amount bars used next to plain counts in table cells */
 .mini-bar-wrap {

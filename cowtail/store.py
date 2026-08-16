@@ -296,6 +296,35 @@ class HistoryStore:
             [r[0], r[1], country_names.get(r[0], r[0])] for r in country_rows
         ]
 
+        def top_isps():
+            rows = [
+                list(r)
+                for r in self._conn.execute(
+                    f"SELECT i.isp AS v, COUNT(DISTINCT e.src_ip) AS c FROM events e"
+                    f" JOIN ips i ON i.ip = e.src_ip WHERE {base}"
+                    f" AND i.isp IS NOT NULL AND i.isp != ''"
+                    f" GROUP BY v ORDER BY c DESC LIMIT ?",
+                    args + [14],
+                ).fetchall()
+            ]
+            if not rows:
+                return rows
+            names = [r[0] for r in rows]
+            best = {}
+            for isp, code, cnt in self._conn.execute(
+                "SELECT i.isp, i.country_code, COUNT(DISTINCT e.src_ip) AS c"
+                " FROM events e JOIN ips i ON i.ip = e.src_ip"
+                f" WHERE {base} AND i.isp IN ({','.join('?' * len(names))})"
+                " AND i.country_code IS NOT NULL AND i.country_code != ''"
+                " GROUP BY i.isp, i.country_code",
+                args + names,
+            ).fetchall():
+                if isp not in best or cnt > best[isp][1]:
+                    best[isp] = (code, cnt)
+            for r in rows:
+                r.append(best.get(r[0], (None, 0))[0])
+            return rows
+
         return {
             "minTs": self._conn.execute(
                 f"SELECT MIN(e.ts) FROM events e WHERE {base}", args
@@ -309,7 +338,7 @@ class HistoryStore:
             "topPasswords": top("e.password"),
             "topCommands": top("e.input"),
             "topCountries": top_countries,
-            "topIsps": top_geo("isp", distinct=True),
+            "topIsps": top_isps(),
         }
 
     def _timeline(self, base: str, args: list, buckets: int) -> dict:
