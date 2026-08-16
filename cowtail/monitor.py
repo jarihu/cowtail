@@ -316,6 +316,9 @@ class CowrieMonitor:
     async def index(self, request: web.Request) -> web.FileResponse:
         return web.FileResponse(STATIC_DIR / "index.html")
 
+    async def history_page(self, request: web.Request) -> web.FileResponse:
+        return web.FileResponse(STATIC_DIR / "history.html")
+
     async def api_stats(self, request: web.Request) -> web.Response:
         empty = {
             "minTs": None,
@@ -351,11 +354,44 @@ class CowrieMonitor:
         data = await asyncio.to_thread(self.store.stats, from_ts, to_ts, buckets)
         return web.json_response(data)
 
+    async def api_history_insights(self, request: web.Request) -> web.Response:
+        empty = {
+            "minTs": None,
+            "maxTs": None,
+            "narrative": {
+                "busiestDays": [],
+                "peakHour": None,
+                "peakDayOfWeek": None,
+                "spikes": [],
+            },
+            "activity": {
+                "hourOfDay": [0] * 24,
+                "dayOfWeek": [0] * 7,
+                "heatmap": [],
+            },
+            "topAttackerIps": [],
+            "countryCities": {},
+            "protocols": [],
+            "topSourcePorts": [],
+        }
+        if self.store is None:
+            return web.json_response(empty)
+
+        from_ts = (
+            to_epoch(request.query.get("from")) if request.query.get("from") else None
+        )
+        to_ts = to_epoch(request.query.get("to")) if request.query.get("to") else None
+
+        data = await asyncio.to_thread(self.store.insights, from_ts, to_ts)
+        return web.json_response(data)
+
     def build_app(self) -> web.Application:
         app = web.Application()
         app.router.add_get("/", self.index)
+        app.router.add_get("/history", self.history_page)
         app.router.add_get("/ws", self.ws_handler)
         app.router.add_get("/api/stats", self.api_stats)
+        app.router.add_get("/api/history", self.api_history_insights)
         app.router.add_static("/static", STATIC_DIR, show_index=False)
         return app
 

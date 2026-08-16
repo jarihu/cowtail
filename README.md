@@ -19,6 +19,7 @@ A real-time, fully-offline web dashboard for the [Cowrie](https://github.com/cow
 - **Worst ISPs** — attackers grouped by hosting provider/ASN with relative bars, mirroring the abuse-leaderboard view popularized by [knock-knock.net](https://knock-knock.net/). Needs an ASN database (see Configuration) or `--online`; falls back gracefully otherwise.
 - **Human-readable timestamps** — relative times ("32m ago") everywhere instead of raw clock times, since a log can span 24h+; hover any timestamp for the exact date and time.
 - **All-time history** — rotated `cowrie.json.N` logs are ingested into a local SQLite database, so stats and charts can cover the full attack history, not just what's currently in memory.
+- **Dedicated History page** — a separate `/history` view turns the SQLite archive into human-readable insights: busiest days, peak attack hour/day-of-week, spike anomalies, a top-attackers table with first/last-seen, per-country city detail, and protocol/port/session-duration breakdowns.
 - **UX** — collapsible and maximizable panels, tabbed intelligence view, table filters (search + severity/VT chips).
 - **Fully self-contained** — Leaflet, Chart.js, and fonts are vendored locally. No CDN, no network calls.
 
@@ -110,13 +111,15 @@ passed through (`-e PORT=9090`, `-e HONEYPOT_LABEL=...`, etc.).
 
 GeoIP resolution order: in-memory cache → local `*.mmdb` → bundled DB-IP country DB → (opt-in) ipwho.is. ISP/ASN attribution resolves separately, from a local `*asn*.mmdb` if present, else from ipwho.is when `--online` is set.
 
-Rotated `cowrie.json.N` files matching `--rotated-glob` are parsed once into the SQLite history database (tracked by path/mtime/size, so re-runs don't re-ingest) and picked up again every 60s for newly rotated files. The dashboard's "All-time" toggle queries this database instead of the in-memory event buffer.
+Rotated `cowrie.json.N` files matching `--rotated-glob` are parsed once into the SQLite history database (tracked by path/mtime/size, so re-runs don't re-ingest) and picked up again every 60s for newly rotated files. The dedicated History page at `/history` queries this database for narrative insights and breakdowns, independent of the live in-memory dashboard.
 
 ## How it works
 
 `server.py` runs an [aiohttp](https://docs.aiohttp.org/) web server that serves the bundled `static/` assets and a `/ws` WebSocket endpoint. On connect it sends a snapshot of the current log, then tails the file and streams each new line as a JSON event. Attacker IPs are GeoIP-resolved server-side and attached to events (and streamed as `geo` messages), so the browser never makes a network call.
 
 The frontend (`static/app.js`) aggregates events into attackers, sessions, credentials, commands, countries, and malware records. VirusTotal `cowrie.virustotal.scanfile` events are joined to downloads by SHA-256, so each sample shows its verdict.
+
+The `/history` page (`static/history.html` + `static/js/history-page.js`) is a separate, static-on-load view with no WebSocket connection — it fetches `/api/history` once and renders narrative callouts, activity patterns, and breakdown tables from `HistoryStore.insights()`.
 
 ## Project layout
 
@@ -126,7 +129,8 @@ cowtail/
   monitor.py, geo.py, store.py, simulator.py, config.py, data.py, util.py
 static/
   index.html, styles.css, app.js
-  js/                     # native ES modules (state, render, charts, ui, history, ...)
+  history.html             # dedicated /history page (narrative + breakdowns from SQLite)
+  js/                     # native ES modules (state, render, charts, ui, history, history-page, ...)
   vendor/                 # bundled Leaflet, Chart.js, fonts, flags, world map
 data/
   geoip-country-ipv4.csv  # DB-IP country database (CC-BY-4.0)

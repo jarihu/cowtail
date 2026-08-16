@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>COWTAIL // Attack History</title>
+
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="fx fx-grid" aria-hidden="true"></div>
+  <div class="fx fx-glow" aria-hidden="true"></div>
+  <div class="fx fx-scan" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 48 48" aria-hidden="true">
+        <path class="logo-shell" d="M24 6c7 0 12 6 12 13 0 4-2 7-5 9 0 5-2 9-7 9s-7-4-7-9c-3-2-5-5-5-9C12 12 17 6 24 6z" fill="none"/>
+        <path class="logo-spiral" d="M24 12c3 0 6 2 6 6 0 3-1 5-4 6 0 2-1 4-2 4s-2-2-2-4c-2-1-4-3-4-6 0-4 3-6 6-6z" fill="none"/>
+        <circle class="logo-dot" cx="26" cy="18" r="1.4"/>
+      </svg>
+      <div class="brand-text">
+        <h1>COWTAIL</h1>
+        <span class="tagline">INTRUSION DECEPTION GRID</span>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <div class="mode-pill" data-mode="history">ALL-TIME HISTORY</div>
+      <a class="chip nav-link" href="/">← Live Dashboard</a>
+    </div>
+  </header>
+
+  <main class="dashboard history-dashboard">
+    <section class="panel narrative-panel">
+      <div class="panel-head">
+        <span class="panel-title">NARRATIVE</span>
+        <span class="panel-sub">WHAT HAPPENED</span>
+      </div>
+      <div class="callouts" id="callouts">
+        <div class="country-empty">loading history…</div>
+      </div>
+    </section>
+
+    <section class="panel pattern-panel">
+      <div class="panel-head">
+        <span class="panel-title">ACTIVITY PATTERNS</span>
+        <span class="panel-sub">WHEN ATTACKS HAPPEN</span>
+      </div>
+      <div class="history-charts">
+        <div class="stat-box">
+          <div class="stat-label">ACTIVITY BY HOUR (UTC)</div>
+          <div class="chart-wrap" id="hourChartWrap"><canvas id="historyHourChart"></canvas></div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">ACTIVITY BY DAY OF WEEK</div>
+          <div class="chart-wrap" id="dowChartWrap"><canvas id="historyDowChart"></canvas></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel attackers-panel">
+      <div class="panel-head">
+        <span class="panel-title">TOP ATTACKERS</span>
+        <span class="panel-sub" id="attackersSub">—</span>
+      </div>
+      <div class="table-scroll">
+        <table class="sessions-table">
+          <thead>
+            <tr>
+              <th>Attacker</th><th>Country</th><th>Events</th>
+              <th>First Seen</th><th>Last Seen</th><th>Logins</th><th>Commands</th><th>ISP</th>
+            </tr>
+          </thead>
+          <tbody id="attackersBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel country-panel">
+      <div class="panel-head">
+        <span class="panel-title">COUNTRY / CITY DETAIL</span>
+        <span class="panel-sub">TOP ORIGINS</span>
+      </div>
+      <div class="country-list" id="countryCities">
+        <div class="country-empty">loading history…</div>
+      </div>
+    </section>
+
+    <section class="panel protocol-panel">
+      <div class="panel-head">
+        <span class="panel-title">BREAKDOWNS</span>
+        <span class="panel-sub">PROTOCOLS · PORTS · DURATION</span>
+      </div>
+      <div class="protocol-grid">
+        <div class="stat-box stat-box--donut" id="protocolBox">
+          <div class="stat-label">PROTOCOL SPLIT</div>
+          <div class="chart-wrap chart-wrap--donut" id="protocolChartWrap"><canvas id="historyProtocolChart"></canvas></div>
+        </div>
+        <div class="stat-box" id="portsBox">
+          <div class="stat-label">TOP ATTACKER SOURCE PORTS</div>
+          <div class="chart-wrap" id="portsChartWrap"><canvas id="historyPortsChart"></canvas></div>
+        </div>
+        <div class="stat-box" id="durationBox">
+          <div class="stat-label">SESSION DURATION</div>
+          <div class="chart-wrap" id="durationChartWrap"><canvas id="historyDurationChart"></canvas></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/vendor/chartjs/chart.umd.min.js"></script>
+  <script type="module" src="/static/js/history-page.js"></script>
+</body>
+</html>

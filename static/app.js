@@ -7,7 +7,7 @@ import { renderAll } from "./js/render.js";
 import { makeCharts } from "./js/charts.js";
 import { connect } from "./js/ws.js";
 import { animateMissiles } from "./js/map.js";
-import { setupPanels, setupFilters, setupTimeRange, setupHistory, tickClock } from "./js/ui.js";
+import { setupPanels, setupFilters, setupTimeRange, tickClock } from "./js/ui.js";
 import { refreshRelativeTimes } from "./js/util.js";
 
 let liveSince = Date.now();
@@ -36,7 +36,6 @@ function boot() {
   setupPanels();
   setupFilters();
   setupTimeRange();
-  setupHistory();
   connect();
   requestAnimationFrame(animateMissiles);
 }

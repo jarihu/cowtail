@@ -96,34 +96,3 @@ export function countryCount() {
   }
   return s.size;
 }
-
-export function updateCountriesFromHistory(h) {
-  const rows = h.topCountries || [];
-  const max = rows.length ? rows[0][1] : 1;
-  const list = $("#countryList");
-  list.innerHTML = rows.length
-    ? rows.map((c) => `
-        <div class="crow">
-          ${flagImg(c[0])}
-          <span class="cname"><span class="cname-t">${escapeHtml(c[2] || c[0])}</span></span>
-          <span class="ccount">${c[1]}</span>
-          <span class="cbar-wrap"><span class="cbar" style="width:${(c[1] / max) * 100}%"></span></span>
-        </div>`).join("")
-    : '<div class="country-empty">no historical data yet</div>';
-}
-
-export function updateISPsFromHistory(h) {
-  const rows = h.topIsps || [];
-  const max = rows.length ? rows[0][1] : 1;
-  const list = $("#ispList");
-  if (!list) return;
-  list.innerHTML = rows.length
-    ? rows.map((r) => `
-        <div class="crow">
-          ${flagImg(r[2])}
-          <span class="cname"><span class="cname-t" title="${escapeHtml(r[0])}">${escapeHtml(r[0])}</span></span>
-          <span class="ccount">${r[1]}</span>
-          <span class="cbar-wrap"><span class="cbar" style="width:${(r[1] / max) * 100}%"></span></span>
-        </div>`).join("")
-    : '<div class="country-empty">no ISP history yet</div>';
-}

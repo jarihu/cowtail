@@ -341,6 +341,199 @@ class HistoryStore:
             "topIsps": top_isps(),
         }
 
+    def insights(self, from_ts: int | None, to_ts: int | None) -> dict:
+        with self._guard:
+            return self._insights(from_ts, to_ts)
+
+    def _insights(self, from_ts: int | None, to_ts: int | None) -> dict:
+        conds = ["1=1"]
+        args: list = []
+        if from_ts is not None:
+            conds.append("e.ts >= ?")
+            args.append(from_ts)
+        if to_ts is not None:
+            conds.append("e.ts <= ?")
+            args.append(to_ts)
+        base = " AND ".join(conds)
+
+        min_ts = self._conn.execute(
+            f"SELECT MIN(e.ts) FROM events e WHERE {base}", args
+        ).fetchone()[0]
+        max_ts = self._conn.execute(
+            f"SELECT MAX(e.ts) FROM events e WHERE {base}", args
+        ).fetchone()[0]
+
+        daily_rows = self._conn.execute(
+            f"SELECT date(e.ts,'unixepoch') AS d, COUNT(*) AS c FROM events e"
+            f" WHERE {base} GROUP BY d ORDER BY c DESC, d DESC",
+            args,
+        ).fetchall()
+        busiest_days = [[d, c] for d, c in daily_rows[:5]]
+
+        daily = {d: c for d, c in daily_rows}
+        spikes: list[list] = []
+        if len(daily) >= 3:
+            counts = list(daily.values())
+            mean = sum(counts) / len(counts)
+            if mean > 0:
+                variance = sum((c - mean) ** 2 for c in counts) / len(counts)
+                stddev = variance**0.5
+                threshold = max(mean + 2 * stddev, 2 * mean)
+                spikes = [[d, c] for d, c in sorted(daily.items()) if c > threshold]
+
+        hour_rows = self._conn.execute(
+            f"SELECT strftime('%H', e.ts,'unixepoch') AS hr, COUNT(*) AS c"
+            f" FROM events e WHERE {base} GROUP BY hr",
+            args,
+        ).fetchall()
+        hours = [0] * 24
+        for hr, c in hour_rows:
+            hours[int(hr)] += c
+        peak_hour = hours.index(max(hours)) if hour_rows else None
+
+        dow_rows = self._conn.execute(
+            f"SELECT strftime('%w', e.ts,'unixepoch') AS dow, COUNT(*) AS c"
+            f" FROM events e WHERE {base} GROUP BY dow",
+            args,
+        ).fetchall()
+        days = [0] * 7
+        for dow, c in dow_rows:
+            days[int(dow)] += c
+        peak_dow = days.index(max(days)) if dow_rows else None
+
+        heat_rows = self._conn.execute(
+            f"SELECT strftime('%w', e.ts,'unixepoch') AS dow,"
+            f" strftime('%H', e.ts,'unixepoch') AS hr, COUNT(*) AS c"
+            f" FROM events e WHERE {base} GROUP BY dow, hr",
+            args,
+        ).fetchall()
+        heatmap = [[int(dow), int(hr), c] for dow, hr, c in heat_rows]
+
+        top_rows = self._conn.execute(
+            f"SELECT e.src_ip, COUNT(*) AS c, MIN(e.ts) AS first_ts,"
+            f" MAX(e.ts) AS last_ts,"
+            f" SUM(CASE WHEN e.eventid IN"
+            f" ('cowrie.login.success','cowrie.login.failed') THEN 1 ELSE 0 END)"
+            f" AS logins,"
+            f" SUM(CASE WHEN e.eventid IN"
+            f" ('cowrie.command.input','cowrie.command.failed') THEN 1 ELSE 0 END)"
+            f" AS commands"
+            f" FROM events e WHERE {base} AND e.src_ip IS NOT NULL AND e.src_ip != ''"
+            f" GROUP BY e.src_ip ORDER BY c DESC LIMIT 20",
+            args,
+        ).fetchall()
+        top_ips: list[dict] = []
+        if top_rows:
+            ip_list = [r[0] for r in top_rows]
+            geo_map = {}
+            for ip, cc, country, city, isp in self._conn.execute(
+                "SELECT ip, country_code, country, city, isp FROM ips"
+                f" WHERE ip IN ({','.join('?' * len(ip_list))})",
+                ip_list,
+            ).fetchall():
+                geo_map[ip] = (cc, country, city, isp)
+            for ip, c, first_ts, last_ts, logins, commands in top_rows:
+                cc, country, city, isp = geo_map.get(ip, (None, None, None, None))
+                top_ips.append(
+                    {
+                        "ip": ip,
+                        "count": c,
+                        "firstTs": first_ts,
+                        "lastTs": last_ts,
+                        "logins": logins or 0,
+                        "commands": commands or 0,
+                        "country_code": cc,
+                        "country": country,
+                        "city": city,
+                        "isp": isp,
+                    }
+                )
+
+        city_rows = self._conn.execute(
+            f"SELECT i.country_code, i.city, COUNT(DISTINCT e.src_ip) AS c"
+            f" FROM events e JOIN ips i ON i.ip = e.src_ip WHERE {base}"
+            f" AND i.country_code IS NOT NULL AND i.country_code != ''"
+            f" AND i.city IS NOT NULL AND i.city != ''"
+            f" GROUP BY i.country_code, i.city",
+            args,
+        ).fetchall()
+        country_cities: dict[str, list] = {}
+        if city_rows:
+            by_country: dict[str, list] = {}
+            for cc, city, c in city_rows:
+                by_country.setdefault(cc, []).append([city, c])
+            totals = {
+                cc: sum(v[1] for v in cities) for cc, cities in by_country.items()
+            }
+            for cc in sorted(totals, key=totals.get, reverse=True)[:8]:
+                country_cities[cc] = sorted(
+                    by_country[cc], key=lambda x: x[1], reverse=True
+                )[:5]
+
+        proto_rows = self._conn.execute(
+            f"SELECT e.protocol, COUNT(DISTINCT e.session) AS c FROM events e"
+            f" WHERE {base} AND e.protocol IS NOT NULL AND e.protocol != ''"
+            f" GROUP BY e.protocol ORDER BY c DESC",
+            args,
+        ).fetchall()
+        protocols = [[p, c] for p, c in proto_rows]
+
+        port_rows = self._conn.execute(
+            f"SELECT e.src_port, COUNT(*) AS c FROM events e WHERE {base}"
+            f" AND e.src_port IS NOT NULL GROUP BY e.src_port"
+            f" ORDER BY c DESC LIMIT 15",
+            args,
+        ).fetchall()
+        top_source_ports = [[int(p), c] for p, c in port_rows]
+
+        dur_values = [
+            r[0]
+            for r in self._conn.execute(
+                f"SELECT e.duration_ms FROM events e WHERE {base}"
+                f" AND e.eventid = 'cowrie.session.closed'"
+                f" AND e.duration_ms IS NOT NULL",
+                args,
+            ).fetchall()
+        ]
+
+        result = {
+            "minTs": min_ts,
+            "maxTs": max_ts,
+            "narrative": {
+                "busiestDays": busiest_days,
+                "peakHour": peak_hour,
+                "peakDayOfWeek": peak_dow,
+                "spikes": spikes,
+            },
+            "activity": {
+                "hourOfDay": hours,
+                "dayOfWeek": days,
+                "heatmap": heatmap,
+            },
+            "topAttackerIps": top_ips,
+            "countryCities": country_cities,
+            "protocols": protocols,
+            "topSourcePorts": top_source_ports,
+        }
+
+        if len(dur_values) >= 3:
+            labels = ["<10s", "10-60s", "1-5m", "5-30m", "30m+"]
+            counts = [0, 0, 0, 0, 0]
+            for ms in dur_values:
+                if ms < 10_000:
+                    counts[0] += 1
+                elif ms < 60_000:
+                    counts[1] += 1
+                elif ms < 300_000:
+                    counts[2] += 1
+                elif ms < 1_800_000:
+                    counts[3] += 1
+                else:
+                    counts[4] += 1
+            result["sessionDuration"] = {"buckets": labels, "counts": counts}
+
+        return result
+
     def _timeline(self, base: str, args: list, buckets: int) -> dict:
         if buckets <= 0:
             buckets = 40

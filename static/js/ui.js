@@ -6,7 +6,6 @@ import { state, filters, shared } from "./state.js";
 import { charts } from "./charts.js";
 import { map, redrawArcs } from "./map.js";
 import { reaggregate } from "./aggregate.js";
-import { fetchStats } from "./history.js";
 import { renderFeed } from "./feed.js";
 import { $, $$, fmtRange } from "./util.js";
 
@@ -201,30 +200,6 @@ export function setupTimeRange() {
       hi.value = Math.max(0, Math.min(1000, Math.round(((shared.timeRange[1] - state.timeMin) / span) * 1000)));
     }
   };
-}
-
-export function setupHistory() {
-  const btn = document.getElementById("historyToggle");
-  if (!btn) return;
-  btn.addEventListener("click", async () => {
-    if (shared.historyActive) {
-      shared.historyActive = false;
-      btn.classList.remove("active");
-      shared.renderDirty = true;
-      return;
-    }
-    try {
-      await fetchStats();
-    } catch {
-      shared.historyActive = false;
-      btn.classList.remove("active");
-      shared.renderDirty = true;
-      return;
-    }
-    shared.historyActive = true;
-    btn.classList.add("active");
-    shared.renderDirty = true;
-  });
 }
 
 export function tickClock() {

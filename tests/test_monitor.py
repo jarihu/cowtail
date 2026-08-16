@@ -155,3 +155,65 @@ async def test_stats_endpoint_empty_in_demo(tmp_path):
     assert data["summary"]["connections"] == 0
     await client.close()
     await m.resolver.close()
+
+
+async def test_history_insights_endpoint(tmp_path):
+    (tmp_path / "cowrie.json.1").write_text(
+        '{"eventid":"cowrie.session.connect","session":"a1","src_ip":"10.0.0.1","src_port":4432,"protocol":"ssh","timestamp":"2026-08-15T10:00:00Z"}\n'
+        '{"eventid":"cowrie.login.failed","session":"a1","src_ip":"10.0.0.1","username":"root","password":"x","timestamp":"2026-08-15T10:00:05Z"}\n',
+        encoding="utf-8",
+    )
+    m = CowrieMonitor(
+        log_path=tmp_path / "cowrie.json", demo=False, db_path=str(tmp_path / "hist.db")
+    )
+    assert await m.ingest_rotated() == 2
+
+    server = TestServer(m.build_app())
+    client = TestClient(server)
+    await client.start_server()
+    resp = await client.get("/api/history")
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["minTs"] is not None
+    assert data["narrative"]["busiestDays"] == [["2026-08-15", 2]]
+    assert data["narrative"]["peakHour"] == 10
+    assert data["narrative"]["peakDayOfWeek"] == 6
+    assert data["activity"]["hourOfDay"][10] == 2
+    assert len(data["topAttackerIps"]) == 1
+    assert data["topAttackerIps"][0]["ip"] == "10.0.0.1"
+    assert data["topAttackerIps"][0]["logins"] == 1
+    assert data["protocols"] == [["ssh", 1]]
+    assert data["topSourcePorts"] == [[4432, 1]]
+    assert "sessionDuration" not in data
+    await client.close()
+    m.store.close()
+    await m.resolver.close()
+
+
+async def test_history_insights_empty_in_demo(tmp_path):
+    m = CowrieMonitor(log_path=tmp_path / "cowrie.json", demo=True)
+    server = TestServer(m.build_app())
+    client = TestClient(server)
+    await client.start_server()
+    resp = await client.get("/api/history")
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["minTs"] is None
+    assert data["narrative"]["busiestDays"] == []
+    assert data["activity"]["hourOfDay"] == [0] * 24
+    assert data["activity"]["dayOfWeek"] == [0] * 7
+    assert data["topAttackerIps"] == []
+    await client.close()
+    await m.resolver.close()
+
+
+async def test_history_page_served(tmp_path):
+    m = CowrieMonitor(log_path=tmp_path / "cowrie.json", demo=True)
+    server = TestServer(m.build_app())
+    client = TestClient(server)
+    await client.start_server()
+    resp = await client.get("/history")
+    assert resp.status == 200
+    assert "text/html" in resp.headers.get("Content-Type", "")
+    await client.close()
+    await m.resolver.close()

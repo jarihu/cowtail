@@ -22,7 +22,6 @@ export const state = {
   timeMin: null,         // ms - earliest event timestamp
   timeMax: null,         // ms - latest event timestamp
   latestTs: null,        // ms - most recent event (for "stale" detection)
-  history: null,         // last /api/stats payload (all-time or ranged)
 };
 
 export const filters = {
@@ -37,5 +36,4 @@ export const shared = {
   renderDirty: false,
   timeRange: null,       // [loMs, hiMs] or null = all data
   refreshTimebar: null,
-  historyActive: false,  // true -> show SQLite-backed all-time stats
 };

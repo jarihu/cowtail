@@ -4,17 +4,10 @@
 
 import { state } from "./state.js";
 import { $ } from "./util.js";
+import { gradient, barOpts, chartGrid } from "./chart-helpers.js";
 
 export const charts = {};
 let chartReady = false;
-
-function gradient(canvas, c1, c2) {
-  const ctx = canvas.getContext("2d");
-  const g = ctx.createLinearGradient(0, 0, 0, canvas.height || 200);
-  g.addColorStop(0, c1);
-  g.addColorStop(1, c2);
-  return g;
-}
 
 function topN(map, n) {
   return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, n);
@@ -88,7 +81,7 @@ export function makeCharts() {
   Chart.defaults.font.family = '"JetBrains Mono", monospace';
   Chart.defaults.font.size = 10;
 
-  const grid = { color: "rgba(120,170,190,0.08)" };
+  const grid = chartGrid;
   const noTicks = { display: false };
 
   // timeline
@@ -130,18 +123,6 @@ export function makeCharts() {
   });
 
   // horizontal bar charts
-  const barOpts = (max) => ({
-    indexAxis: "y",
-    responsive: true,
-    maintainAspectRatio: false,
-    animation: { duration: 350 },
-    plugins: { legend: { display: false } },
-    scales: {
-      x: { grid, ticks: { precision: 0, color: "#3d5361" }, beginAtZero: true, suggestedMax: max },
-      y: { grid: { display: false }, ticks: { color: "#69808f" } },
-    },
-  });
-
   charts.usernames = new Chart($("#usernameChart"), {
     type: "bar",
     data: { labels: [], datasets: [{ data: [], backgroundColor: "#38d7f0", borderRadius: 3 }] },
@@ -195,40 +176,6 @@ export function updateTimeline() {
     $("#timelineChart"), "rgba(44,230,155,0.35)", "rgba(44,230,155,0)");
   charts.timeline.data.datasets[1].data = logins;
   charts.timeline.update("none");
-}
-
-export function updateHistoryCharts(h) {
-  if (!chartReady || !h) return;
-  if (h.timeline) {
-    const n = (h.timeline.labels || []).length;
-    const minMs = (h.minTs || 0) * 1000;
-    const maxMs = (h.maxTs || 0) * 1000;
-    if (n && maxMs > minMs) {
-      const multiDay = maxMs - minMs > 86400000;
-      charts.timeline.data.labels = Array.from({ length: n }, (_, i) =>
-        tickLabel(minMs + ((maxMs - minMs) / n) * (i + 0.5), multiDay));
-      charts.timeline.$dayBounds = dayBounds(minMs, maxMs, n);
-    } else {
-      charts.timeline.data.labels = h.timeline.labels || [];
-      charts.timeline.$dayBounds = [];
-    }
-    charts.timeline.data.datasets[0].data = h.timeline.events || [];
-    charts.timeline.data.datasets[0].backgroundColor = gradient(
-      $("#timelineChart"), "rgba(44,230,155,0.35)", "rgba(44,230,155,0)");
-    charts.timeline.data.datasets[1].data = h.timeline.logins || [];
-    charts.timeline.update("none");
-  }
-  const pairs = [
-    [charts.usernames, h.topUsernames],
-    [charts.passwords, h.topPasswords],
-    [charts.commands, h.topCommands],
-  ];
-  for (const [chart, rows] of pairs) {
-    const list = rows || [];
-    chart.data.labels = list.map((x) => x[0]);
-    chart.data.datasets[0].data = list.map((x) => x[1]);
-    chart.update("none");
-  }
 }
 
 export function updateProtocol() {

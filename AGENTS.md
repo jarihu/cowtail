@@ -10,7 +10,7 @@ The whole thing is a **Python aiohttp web server** (`server.py`) that:
 2. Exposes a `/ws` WebSocket endpoint.
 3. Tails `cowrie.json` (or a synthetic simulator in `--demo` mode), parsing each line as a JSON event.
 4. GeoIP-resolves attacker IPs **server-side** (offline) and attaches the result to events, so the browser never phones home.
-5. Ingests rotated `cowrie.json*` files into a local SQLite history DB (`HistoryStore`) for all-time statistics, exposed via `/api/stats`.
+5. Ingests rotated `cowrie.json*` files into a local SQLite history DB (`HistoryStore`) for all-time statistics, exposed via `/api/stats` (raw aggregates) and `/api/history` (narrative insights + breakdowns, rendered on the dedicated `/history` page).
 
 The frontend (`static/app.js`) aggregates the raw event stream into attackers, sessions, credentials, commands, countries, and malware payloads, and renders the dashboard (map, live feed, charts, tables).
 
@@ -37,7 +37,8 @@ cowtail/
   monitor.py                  # CowrieMonitor — aiohttp app + WS + tail/demo loops
 static/
   index.html                  # markup (panels, tabs, tables)
-  styles.css                  # all styling (cyber/terminal aesthetic)
+  history.html                # dedicated /history page markup (narrative + breakdowns)
+  styles.css                  # all styling (cyber/terminal aesthetic), incl. history page
   app.js                      # ES module entry (boot + render scheduler)
   js/
     state.js                  # shared app state + mutable cross-module flags
@@ -45,6 +46,7 @@ static/
     aggregate.js              # event -> attackers/sessions aggregation
     feed.js                   # live event stream
     charts.js                 # Chart.js rendering (timeline, protocol, bars)
+    chart-helpers.js          # shared Chart.js styling (gradient, barOpts, chartGrid)
     countries.js              # country + worst-ISP leaderboards
     sessions.js               # attacker sessions table
     malware.js                # malware payloads table
@@ -52,7 +54,8 @@ static/
     render.js                 # renderAll (funnels all update* functions)
     ws.js                     # WebSocket client (snapshot + event/geo stream)
     ui.js                     # panels, tabs, filters, time-range wiring
-    history.js                # fetches /api/stats for all-time historical stats
+    history.js                # fetchInsights() for /api/history
+    history-page.js           # entry module for /history — no live/WS deps
   vendor/                     # vendored Leaflet, Chart.js, fonts, flags, world-data.js
 data/
   geoip-country-ipv4.csv      # DB-IP country DB (start,end,code), binary-searched
@@ -84,10 +87,14 @@ On connect, the client receives one `snapshot` message, then a stream of `event`
 ### HTTP endpoints
 
 - `GET /api/stats?from=&to=&buckets=` — SQLite-backed aggregates over the ingested history: `summary` counts, a bucketed `timeline`, and top-N `topUsernames`/`topPasswords`/`topCommands`/`topCountries`/`topIsps`. `from`/`to` are ISO timestamps (optional). Returns zeros/empty when history is unavailable (e.g. demo mode).
+- `GET /api/history?from=&to=` — `HistoryStore.insights()`: narrative highlights (`busiestDays`, `peakHour`, `peakDayOfWeek`, `spikes`), an hour-of-day/day-of-week/heatmap `activity` block, `topAttackerIps` (with first/last-seen + login/command counts), `countryCities`, `protocols`, `topSourcePorts`, and an optional `sessionDuration` histogram (omitted when fewer than 3 samples). Backs the `/history` page. Same empty-shape fallback as `/api/stats` when history is unavailable.
+- `GET /history` — serves `static/history.html`, the dedicated all-time history page.
 
 ### Frontend (`static/app.js` + `static/js/`)
 
-ES modules. State lives in `state.js` (the `state` object plus a `shared` object of mutable cross-module flags — ES module bindings are immutable, so modules mutate `shared.*` properties rather than reassigning imports). Aggregation is `aggregateEvent`/`reaggregate`; `handleEvent` mutates in-memory aggregates incrementally. The map, feed, tables, and charts are each re-rendered by dedicated `update*`/`render*` functions, all funneled through `renderAll` (throttled, in `render.js`). It treats every `src_ip` as an "attacker" and rolls events up into `sessions` keyed by Cowrie `session` id. The "All-time" toggle (via `history.js` + `shared.historyActive`) swaps the KPI cards, timeline, bar charts, and country/ISP leaderboards over to SQLite-backed `/api/stats` data; the map, sessions, and malware views stay live-window only.
+ES modules. State lives in `state.js` (the `state` object plus a `shared` object of mutable cross-module flags — ES module bindings are immutable, so modules mutate `shared.*` properties rather than reassigning imports). Aggregation is `aggregateEvent`/`reaggregate`; `handleEvent` mutates in-memory aggregates incrementally. The map, feed, tables, and charts are each re-rendered by dedicated `update*`/`render*` functions, all funneled through `renderAll` (throttled, in `render.js`). It treats every `src_ip` as an "attacker" and rolls events up into `sessions` keyed by Cowrie `session` id.
+
+The `/history` page is a separate entry point (`history.html` + `history-page.js`) with no WebSocket/live-state dependency — it fetches `/api/history` once on load and renders narrative callouts, hour/day activity charts, a top-attackers table, country/city breakdown, and protocol/port/duration charts. It does not touch `state.js`/`shared`/`ws.js`; the live dashboard (`index.html`) links to it instead of the old in-place "All-time" toggle (removed).
 
 ## Conventions to follow
 
