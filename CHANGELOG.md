@@ -27,6 +27,10 @@ SSH/Telnet honeypot.
   credential/command/country/ISP charts, and a live event stream.
 - **Worst ISPs** — attackers grouped by hosting provider/ASN with relative bars,
   backed by an ASN `.mmdb` or `--online` (graceful fallback otherwise).
+- **All-time history** — rotated `cowrie.json.N` logs are ingested into a local
+  SQLite database (`cowtail/store.py`, `--db`/`--rotated-glob`), powering an
+  "All-time" toggle on the dashboard's stats view alongside the live in-memory
+  window.
 - **Human-readable timestamps** — relative times everywhere, with exact
   date/time on hover.
 - **UX** — collapsible and maximizable panels, tabbed intelligence view, table

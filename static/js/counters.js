@@ -42,3 +42,13 @@ export const counters = {
   commands: new Counter($("#kpiCommands"), $("#kpiCommands").closest(".kpi")),
   countries: new Counter($("#kpiCountries"), $("#kpiCountries").closest(".kpi")),
 };
+
+export function setHistoryCounters(h) {
+  const s = h.summary || {};
+  counters.connections.set(s.connections || 0);
+  counters.loginOk.set(s.loginOk || 0);
+  counters.loginFail.set(s.loginFail || 0);
+  counters.attackers.set(s.uniqueIps || 0);
+  counters.commands.set(s.commands || 0);
+  counters.countries.set(s.uniqueCountries || 0);
+}

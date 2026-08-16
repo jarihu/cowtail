@@ -133,6 +133,29 @@ export function updateTimeline() {
   charts.timeline.update("none");
 }
 
+export function updateHistoryCharts(h) {
+  if (!chartReady || !h) return;
+  if (h.timeline) {
+    charts.timeline.data.labels = h.timeline.labels || [];
+    charts.timeline.data.datasets[0].data = h.timeline.events || [];
+    charts.timeline.data.datasets[0].backgroundColor = gradient(
+      $("#timelineChart"), "rgba(44,230,155,0.35)", "rgba(44,230,155,0)");
+    charts.timeline.data.datasets[1].data = h.timeline.logins || [];
+    charts.timeline.update("none");
+  }
+  const pairs = [
+    [charts.usernames, h.topUsernames],
+    [charts.passwords, h.topPasswords],
+    [charts.commands, h.topCommands],
+  ];
+  for (const [chart, rows] of pairs) {
+    const list = rows || [];
+    chart.data.labels = list.map((x) => x[0]);
+    chart.data.datasets[0].data = list.map((x) => x[1]);
+    chart.update("none");
+  }
+}
+
 export function updateProtocol() {
   if (!chartReady) return;
   let ssh = 0, telnet = 0;

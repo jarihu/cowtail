@@ -9,6 +9,7 @@ import asyncio
 import bisect
 import json
 from array import array
+from collections import OrderedDict
 from pathlib import Path
 
 import aiohttp
@@ -16,6 +17,8 @@ import aiohttp
 from .config import DATA_DIR
 from .data import DEMO_ATTACKER_ISPS
 from .util import flag_emoji, ip_to_int, is_private
+
+GEO_CACHE_MAX = 50_000
 
 
 class CountryDB:
@@ -82,27 +85,19 @@ class GeoResolver:
     def __init__(
         self, demo: bool = False, online: bool = False, data_dir: Path = DATA_DIR
     ):
-        self._cache: dict[str, dict] = {}
+        self._cache: OrderedDict[str, dict] = OrderedDict()
         self._demo = demo
         self._online = online
+        self._data_dir = data_dir
         self._session: aiohttp.ClientSession | None = None
         self._sem = asyncio.Semaphore(8)
         self._db: CountryDB | None = None
+        self._db_lock = asyncio.Lock()
+        self._db_attempted = False
         self._mmdb = None
         self._asn_mmdb = None
 
         if not demo:
-            csv_path = data_dir / "geoip-country-ipv4.csv"
-            countries_path = data_dir / "countries.json"
-            if csv_path.exists() and countries_path.exists():
-                try:
-                    self._db = CountryDB(csv_path, countries_path)
-                    print(
-                        f"  geoip  : {self._db.count} IPv4 ranges loaded (offline DB-IP)"
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    print(f"  geoip  : failed to load country DB ({exc})")
-
             try:
                 import maxminddb  # noqa: PLC0415
             except ImportError:
@@ -139,25 +134,58 @@ class GeoResolver:
                     except Exception as exc:  # noqa: BLE001
                         print(f"  geoip  : failed to open {asn_file.name} ({exc})")
 
+    def _load_country_db(self) -> CountryDB | None:
+        if self._db is not None:
+            return self._db
+        csv_path = self._data_dir / "geoip-country-ipv4.csv"
+        countries_path = self._data_dir / "countries.json"
+        if not (csv_path.exists() and countries_path.exists()):
+            return None
+        try:
+            self._db = CountryDB(csv_path, countries_path)
+            print(f"  geoip  : {self._db.count} IPv4 ranges loaded (offline DB-IP)")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  geoip  : failed to load country DB ({exc})")
+        return self._db
+
+    def _cache_get(self, ip: str) -> dict | None:
+        if ip not in self._cache:
+            return None
+        self._cache.move_to_end(ip)
+        return self._cache[ip]
+
+    def _cache_put(self, ip: str, geo: dict) -> None:
+        if ip in self._cache:
+            self._cache.move_to_end(ip)
+            self._cache[ip] = geo
+            return
+        self._cache[ip] = geo
+        if len(self._cache) > GEO_CACHE_MAX:
+            self._cache.popitem(last=False)
+
     def seed(self, entries: list[tuple]) -> None:
         for ip, code, country, city, lat, lng in entries:
-            self._cache[ip] = {
-                "ip": ip,
-                "country": country,
-                "country_code": code,
-                "city": city,
-                "latitude": lat,
-                "longitude": lng,
-                "flag": flag_emoji(code),
-                "isp": DEMO_ATTACKER_ISPS.get(ip, "SIMULATED"),
-            }
+            self._cache_put(
+                ip,
+                {
+                    "ip": ip,
+                    "country": country,
+                    "country_code": code,
+                    "city": city,
+                    "latitude": lat,
+                    "longitude": lng,
+                    "flag": flag_emoji(code),
+                    "isp": DEMO_ATTACKER_ISPS.get(ip, "SIMULATED"),
+                },
+            )
 
     def known(self, ip: str) -> dict | None:
-        return self._cache.get(ip)
+        return self._cache_get(ip)
 
     async def resolve(self, ip: str) -> dict:
-        if ip in self._cache:
-            return self._cache[ip]
+        cached = self._cache_get(ip)
+        if cached is not None:
+            return cached
         if is_private(ip):
             geo = {
                 "ip": ip,
@@ -169,10 +197,12 @@ class GeoResolver:
                 "flag": "🔒",
                 "isp": "",
             }
-            self._cache[ip] = geo
+            self._cache_put(ip, geo)
             return geo
 
-        geo = self._resolve_local(ip)
+        geo = self._resolve_mmdb(ip)
+        if geo is None:
+            geo = await self._resolve_country(ip)
         if geo is None and self._online:
             try:
                 async with self._sem:
@@ -181,10 +211,10 @@ class GeoResolver:
                 geo = None
         if geo is None:
             geo = self._unknown(ip)
-        self._cache[ip] = geo
+        self._cache_put(ip, geo)
         return geo
 
-    def _resolve_local(self, ip: str) -> dict | None:
+    def _resolve_mmdb(self, ip: str) -> dict | None:
         geo = None
         if self._mmdb is not None:
             try:
@@ -193,13 +223,34 @@ class GeoResolver:
                     geo = self._from_mmdb(ip, rec)
             except Exception:
                 pass
-        if geo is None and self._db is not None:
-            geo = self._db.resolve(ip)
         if geo is not None and not geo.get("isp"):
             isp = self._resolve_isp(ip)
             if isp:
                 geo["isp"] = isp
         return geo
+
+    async def _resolve_country(self, ip: str) -> dict | None:
+        db = await self._ensure_country_db()
+        if db is None:
+            return None
+        geo = db.resolve(ip)
+        if geo is not None and not geo.get("isp"):
+            isp = self._resolve_isp(ip)
+            if isp:
+                geo["isp"] = isp
+        return geo
+
+    async def _ensure_country_db(self) -> CountryDB | None:
+        if self._db is not None:
+            return self._db
+        if self._db_attempted:
+            return None
+        async with self._db_lock:
+            if self._db is not None or self._db_attempted:
+                return self._db
+            self._db_attempted = True
+            self._db = await asyncio.to_thread(self._load_country_db)
+            return self._db
 
     def _resolve_isp(self, ip: str) -> str:
         if self._asn_mmdb is None:

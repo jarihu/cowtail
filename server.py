@@ -56,6 +56,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Enable ipwho.is fallback for IPs missing from the offline DB",
     )
+    p.add_argument(
+        "--db",
+        default=os.environ.get("COWTAIL_DB"),
+        help="SQLite history database path (default: data/cowtail.db)",
+    )
+    p.add_argument(
+        "--rotated-glob",
+        default=os.environ.get("COWTAIL_ROTATED_GLOB"),
+        help="Glob pattern for rotated cowrie.json files (default: <log>* in the log dir)",
+    )
     return p.parse_args(argv)
 
 
@@ -67,6 +77,8 @@ def main() -> int:
         host=args.host,
         port=args.port,
         online=args.online,
+        db_path=args.db,
+        rotated_glob=args.rotated_glob,
     )
     try:
         asyncio.run(monitor.run())

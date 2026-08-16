@@ -18,6 +18,7 @@ A real-time, fully-offline web dashboard for the [Cowrie](https://github.com/cow
 - **Rich stats** — animated KPI cards, activity timeline, credential/command/country/ISP charts (tabbed), live event stream.
 - **Worst ISPs** — attackers grouped by hosting provider/ASN with relative bars, mirroring the abuse-leaderboard view popularized by [knock-knock.net](https://knock-knock.net/). Needs an ASN database (see Configuration) or `--online`; falls back gracefully otherwise.
 - **Human-readable timestamps** — relative times ("32m ago") everywhere instead of raw clock times, since a log can span 24h+; hover any timestamp for the exact date and time.
+- **All-time history** — rotated `cowrie.json.N` logs are ingested into a local SQLite database, so stats and charts can cover the full attack history, not just what's currently in memory.
 - **UX** — collapsible and maximizable panels, tabbed intelligence view, table filters (search + severity/VT chips).
 - **Fully self-contained** — Leaflet, Chart.js, and fonts are vendored locally. No CDN, no network calls.
 
@@ -102,10 +103,14 @@ passed through (`-e PORT=9090`, `-e HONEYPOT_LABEL=...`, etc.).
 | `--host` / `HOST` | `127.0.0.1` | Bind address |
 | `--port` / `PORT` | `8080` | Bind port |
 | `--online` | off | Enable an ipwho.is fallback for IPs missing from the offline DB |
+| `--db` / `COWTAIL_DB` | `data/cowtail.db` | SQLite history database path (not used in `--demo` mode) |
+| `--rotated-glob` / `COWTAIL_ROTATED_GLOB` | `<log>*` in the log dir | Glob pattern for rotated `cowrie.json.N` files to ingest into history |
 | `HONEYPOT_LAT` / `HONEYPOT_LNG` | `52.3676` / `4.9041` | Honeypot position on the map |
 | `HONEYPOT_LABEL` | `Honeypot` | Honeypot marker label |
 
 GeoIP resolution order: in-memory cache → local `*.mmdb` → bundled DB-IP country DB → (opt-in) ipwho.is. ISP/ASN attribution resolves separately, from a local `*asn*.mmdb` if present, else from ipwho.is when `--online` is set.
+
+Rotated `cowrie.json.N` files matching `--rotated-glob` are parsed once into the SQLite history database (tracked by path/mtime/size, so re-runs don't re-ingest) and picked up again every 60s for newly rotated files. The dashboard's "All-time" toggle queries this database instead of the in-memory event buffer.
 
 ## How it works
 
@@ -116,13 +121,17 @@ The frontend (`static/app.js`) aggregates events into attackers, sessions, crede
 ## Project layout
 
 ```
-server.py                 # aiohttp server + GeoIP resolver + demo simulator
+server.py                 # thin CLI entry point
+cowtail/
+  monitor.py, geo.py, store.py, simulator.py, config.py, data.py, util.py
 static/
   index.html, styles.css, app.js
+  js/                     # native ES modules (state, render, charts, ui, history, ...)
   vendor/                 # bundled Leaflet, Chart.js, fonts, flags, world map
 data/
   geoip-country-ipv4.csv  # DB-IP country database (CC-BY-4.0)
   countries.json          # country centroids + names
+  cowtail.db              # SQLite history database (created on first run)
   DBIP-LICENSE
 ```
 

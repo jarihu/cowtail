@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 import json
 
+import cowtail.geo as geo_mod
 from cowtail.geo import CountryDB, GeoResolver
 
 
@@ -128,3 +129,28 @@ def test_unknown():
     assert geo["city"] is None
     assert geo["flag"] == "\U0001f3f3\ufe0f"
     assert geo["isp"] == ""
+
+
+def test_resolver_cache_is_lru(monkeypatch):
+    monkeypatch.setattr(geo_mod, "GEO_CACHE_MAX", 3)
+    r = GeoResolver(demo=True)
+    r.seed([(f"10.0.0.{i}", "US", "USA", "X", 1.0, 2.0) for i in range(10)])
+    assert len(r._cache) == 3
+    assert r.known("10.0.0.0") is None
+    assert r.known("10.0.0.9") is not None
+
+
+def test_country_db_lazy_load(tmp_path):
+    csv, countries = _write_country_db(tmp_path)
+    r = GeoResolver(demo=False, data_dir=tmp_path)
+    assert r._db is None
+
+
+async def test_country_db_loaded_on_first_miss(tmp_path):
+    csv, countries = _write_country_db(tmp_path)
+    r = GeoResolver(demo=False, data_dir=tmp_path)
+    assert r._db is None
+    geo = await r.resolve("1.0.0.0")
+    assert r._db is not None
+    assert geo["country_code"] == "AU"
+    assert geo["country"] == "Australia"

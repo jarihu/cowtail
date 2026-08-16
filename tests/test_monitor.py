@@ -8,14 +8,20 @@ from cowtail.data import DEMO_ATTACKERS
 from cowtail.monitor import CowrieMonitor
 
 
-def test_sensor_from_event():
-    m = CowrieMonitor(log_path=Path("x.json"), demo=False)
+def _no_store(tmp_path):
+    return CowrieMonitor(
+        log_path=Path("x.json"), demo=False, db_path=str(tmp_path / "hist.db")
+    )
+
+
+def test_sensor_from_event(tmp_path):
+    m = _no_store(tmp_path)
     assert m._sensor_from_event({"sensor": "prod"}) == "prod"
     assert m._sensor_from_event({}) == "unknown"
 
 
-def test_ingest_event_appends_and_sets_sensor():
-    m = CowrieMonitor(log_path=Path("x.json"), demo=False)
+def test_ingest_event_appends_and_sets_sensor(tmp_path):
+    m = _no_store(tmp_path)
     m.ingest_event(
         {"eventid": "cowrie.session.connect", "src_ip": "1.2.3.4", "sensor": "prod"},
         broadcast=False,
@@ -24,16 +30,16 @@ def test_ingest_event_appends_and_sets_sensor():
     assert m._sensor == "prod"
 
 
-def test_ingest_event_default_sensor():
-    m = CowrieMonitor(log_path=Path("x.json"), demo=False)
+def test_ingest_event_default_sensor(tmp_path):
+    m = _no_store(tmp_path)
     m.ingest_event(
         {"eventid": "cowrie.session.connect", "src_ip": "1.2.3.4"}, broadcast=False
     )
     assert m._sensor == "unknown"
 
 
-def test_parse_line_json_and_invalid():
-    m = CowrieMonitor(log_path=Path("x.json"), demo=False)
+def test_parse_line_json_and_invalid(tmp_path):
+    m = _no_store(tmp_path)
     m._parse_line('{"eventid": "x", "src_ip": "1.2.3.4"}', broadcast=False)
     assert len(m.events) == 1
     m._parse_line("not json", broadcast=False)
@@ -49,7 +55,7 @@ def test_load_initial_reads_file(tmp_path):
         '{"eventid": "b", "src_ip": "5.6.7.8"}\n',
         encoding="utf-8",
     )
-    m = CowrieMonitor(log_path=log, demo=False)
+    m = CowrieMonitor(log_path=log, demo=False, db_path=str(tmp_path / "hist.db"))
     m.load_initial()
     assert len(m.events) == 2
     assert m._file_offset == log.stat().st_size
@@ -79,3 +85,73 @@ async def test_ws_snapshot(tmp_path):
     assert "honeypot" in msg
     await ws.close()
     await client.close()
+
+
+def test_demo_has_no_store():
+    m = CowrieMonitor(log_path=Path("cowrie.json"), demo=True)
+    assert m.store is None
+    assert m.rotated_glob is None
+
+
+async def test_ingest_rotated_and_stats_endpoint(tmp_path):
+    (tmp_path / "cowrie.json.1").write_text(
+        '{"eventid":"cowrie.session.connect","session":"a1","src_ip":"10.0.0.1","protocol":"ssh","timestamp":"2026-08-15T10:00:00Z"}\n'
+        '{"eventid":"cowrie.login.failed","session":"a1","src_ip":"10.0.0.1","username":"root","password":"x","timestamp":"2026-08-15T10:00:05Z"}\n',
+        encoding="utf-8",
+    )
+    m = CowrieMonitor(
+        log_path=tmp_path / "cowrie.json", demo=False, db_path=str(tmp_path / "hist.db")
+    )
+    assert await m.ingest_rotated() == 2
+    assert await m.ingest_rotated() == 0
+
+    server = TestServer(m.build_app())
+    client = TestClient(server)
+    await client.start_server()
+    resp = await client.get("/api/stats?buckets=40")
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["summary"]["connections"] == 1
+    assert data["summary"]["loginFail"] == 1
+    assert data["summary"]["uniqueIps"] == 1
+    assert data["topUsernames"] == [["root", 1]]
+    assert len(data["timeline"]["labels"]) == 40
+    await client.close()
+    m.store.close()
+    await m.resolver.close()
+
+
+async def test_stats_endpoint_clamps_buckets(tmp_path):
+    (tmp_path / "cowrie.json.1").write_text(
+        '{"eventid":"cowrie.session.connect","session":"a1","src_ip":"10.0.0.1","protocol":"ssh","timestamp":"2026-08-15T10:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    m = CowrieMonitor(
+        log_path=tmp_path / "cowrie.json", demo=False, db_path=str(tmp_path / "hist.db")
+    )
+    await m.ingest_rotated()
+    server = TestServer(m.build_app())
+    client = TestClient(server)
+    await client.start_server()
+    resp = await client.get("/api/stats?buckets=999999")
+    data = await resp.json()
+    assert len(data["timeline"]["labels"]) <= 500
+    resp = await client.get("/api/stats?buckets=-5")
+    data = await resp.json()
+    assert len(data["timeline"]["labels"]) >= 1
+    await client.close()
+    m.store.close()
+    await m.resolver.close()
+
+
+async def test_stats_endpoint_empty_in_demo(tmp_path):
+    m = CowrieMonitor(log_path=tmp_path / "cowrie.json", demo=True)
+    server = TestServer(m.build_app())
+    client = TestClient(server)
+    await client.start_server()
+    resp = await client.get("/api/stats")
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["summary"]["connections"] == 0
+    await client.close()
+    await m.resolver.close()
