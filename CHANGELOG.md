@@ -52,6 +52,16 @@ SSH/Telnet honeypot.
   redone on every page load. `CowrieMonitor` now caches responses by request
   params and drops the cache only when `ingest_rotated()` actually pulls in
   new rows, so repeat visits to `/history` are effectively free.
+- **MITRE ATT&CK technique mapping and command-IOC extraction** — every
+  ingested event is classified against a small Cowrie-eventid-to-ATT&CK map
+  (`cowtail/threat.py`, `techniques` table) and surfaced as a new "Attack
+  Techniques" panel (tactic → technique → count) on the History page.
+  Attacker-typed shell command text (`cowrie.command.input`/`.failed`) is
+  also scanned for embedded public IPs and URLs (`observed_iocs` table,
+  private/loopback/reserved addresses filtered out), listed as "indicators
+  observed in commands" inside the existing Malware & Threat Intel panel
+  rather than as a separate panel, since that data already shares the same
+  hash/URL/IP surface as VirusTotal/URLhaus reports. Schema bumped to v4.
 
 ### Fixed
 

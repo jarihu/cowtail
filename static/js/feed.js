@@ -3,7 +3,7 @@
  * ============================================================= */
 
 import { state, filters } from "./state.js";
-import { $, escapeHtml, timeAgo, relTimeAttrs, flagImg, fmtDur, shortUrl, geoLocation } from "./util.js";
+import { $, escapeHtml, timeAgo, relTimeAttrs, flagImg, fmtDur, shortUrl, geoLocation, fmtDateTime } from "./util.js";
 
 const feedEl = $("#feed");
 let feedCleared = false;
@@ -62,46 +62,127 @@ export function pushFeed(ev) {
   while (feedEl.children.length > 80) feedEl.removeChild(feedEl.lastChild);
 }
 
-function buildSessionSummary(s) {
-  const geo = state.geo.get(s.ip);
-  const dur = s.status === "closed" && s.duration != null ? fmtDur(s.duration) : "active";
-  const creds = s.credentials;
+function stamp(iso) {
+  if (!iso) return "";
+  return `<span class="ss-time">${escapeHtml(fmtDateTime(iso))}</span>`;
+}
+
+function credLine(creds) {
+  if (!creds.length) return "";
   const okCount = creds.filter((c) => c.endsWith("✓")).length;
-  const parts = [];
+  const list = creds.slice(-4).map((c) => {
+    const ok = c.endsWith("✓");
+    return `<span class="${ok ? "ok" : "fail"}">${escapeHtml(c.replace(/ [✓✕]$/, ""))}${ok ? " ✓" : " ✕"}</span>`;
+  }).join(" · ");
+  return `<div class="ss-line"><span class="ss-k">LOGIN</span> ${creds.length} attempt${creds.length > 1 ? "s" : ""} (${okCount} ok) — ${list}</div>`;
+}
 
-  if (creds.length) {
-    const list = creds.slice(-4).map((c) => {
-      const ok = c.endsWith("✓");
-      return `<span class="${ok ? "ok" : "fail"}">${escapeHtml(c.replace(/ [✓✕]$/, ""))}${ok ? " ✓" : " ✕"}</span>`;
-    }).join(" · ");
-    parts.push(`<div class="ss-line"><span class="ss-k">LOGIN</span> ${creds.length} attempt${creds.length > 1 ? "s" : ""} (${okCount} ok) — ${list}</div>`);
-  }
-  if (s.commandsList.length) {
-    const cmds = s.commandsList.slice(-4).map((c) => escapeHtml(c)).join(" · ");
-    parts.push(`<div class="ss-line"><span class="ss-k">CMD</span> ${cmds}${s.commandsList.length > 4 ? " …" : ""}</div>`);
-  }
-  if (s.downloads.length) {
-    const dls = s.downloads.slice(-3).map((u) => escapeHtml(shortUrl(u))).join(" · ");
-    parts.push(`<div class="ss-line"><span class="ss-k ss-dl">DOWNLOAD</span> ${dls}${s.downloads.length > 3 ? " …" : ""}</div>`);
-  }
+function cmdLine(commandsList) {
+  if (!commandsList.length) return "";
+  const cmds = commandsList.slice(-4).map((c) => escapeHtml(c)).join(" · ");
+  return `<div class="ss-line"><span class="ss-k">CMD</span> ${cmds}${commandsList.length > 4 ? " …" : ""}</div>`;
+}
 
+function dlLine(downloads) {
+  if (!downloads.length) return "";
+  const dls = downloads.slice(-3).map((u) => escapeHtml(shortUrl(u))).join(" · ");
+  return `<div class="ss-line"><span class="ss-k ss-dl">DOWNLOAD</span> ${dls}${downloads.length > 3 ? " …" : ""}</div>`;
+}
+
+function sessionLines(s) {
+  return [credLine(s.credentials), cmdLine(s.commandsList), dlLine(s.downloads)].filter(Boolean).join("");
+}
+
+function headMeta(proto, sessions, active, geo) {
+  const loc = escapeHtml(geoLocation(geo) || "unknown");
+  const parts = [proto || "?", `${sessions} session${sessions > 1 ? "s" : ""}`];
+  if (active) parts.push(`${active} active`);
+  parts.push(loc);
+  return parts.join(" · ");
+}
+
+function head(ip, meta, last) {
+  const geo = state.geo.get(ip);
+  return `<div class="ss-head">${flagImg(geo?.country_code)}<span class="ip">${ip}</span> <span class="ss-meta">${meta}</span>${stamp(last)}</div>`;
+}
+
+function aggregateIp(sessions) {
+  const agg = { proto: new Set(), sessions: sessions.length, active: 0, credentials: [], commandsList: [], downloads: [], first: null, last: null };
+  for (const s of sessions) {
+    if (s.protocol) agg.proto.add(s.protocol);
+    if (s.status === "active") agg.active++;
+    agg.credentials.push(...s.credentials);
+    agg.commandsList.push(...s.commandsList);
+    agg.downloads.push(...s.downloads);
+    if (!agg.first || (s.start && s.start < agg.first)) agg.first = s.start;
+    if (!agg.last || (s.lastActivity && s.lastActivity > agg.last)) agg.last = s.lastActivity;
+  }
+  agg.credentials = agg.credentials.slice(-20);
+  agg.commandsList = agg.commandsList.slice(-20);
+  agg.downloads = agg.downloads.slice(-20);
+  return agg;
+}
+
+function buildIpSummary(g) {
+  const a = aggregateIp(g.sessions);
+  const proto = [...a.proto].join("/");
+  const meta = headMeta(proto, a.sessions, a.active, state.geo.get(g.ip));
+  const badge = a.active ? "ACTIVE" : "DONE";
   return `<div class="ev ss">
-    <span class="ev-badge ${s.status === "active" ? "connect" : "info"}">${s.status.toUpperCase()}</span>
+    <span class="ev-badge ${a.active ? "connect" : "info"}">${badge}</span>
     <span class="ev-body">
-      <div class="ss-head">${flagImg(geo?.country_code)}<span class="ip">${s.ip}</span> <span class="ss-meta">${s.protocol || "?"} · ${dur} · ${escapeHtml(geoLocation(geo) || "unknown")}</span></div>
-      ${parts.join("")}
+      ${head(g.ip, meta, a.last)}
+      ${credLine(a.credentials)}${cmdLine(a.commandsList)}${dlLine(a.downloads)}
+    </span>
+  </div>`;
+}
+
+function shortId(id) {
+  const s = String(id || "?");
+  return s.length > 12 ? s.slice(0, 12) + "…" : s;
+}
+
+function buildSessionBlock(s) {
+  const dur = s.status === "closed" && s.duration != null ? fmtDur(s.duration) : "active";
+  const meta = `${escapeHtml(shortId(s.id))} · ${s.protocol || "?"} · ${dur}`;
+  const lines = sessionLines(s);
+  return `<div class="ss-session">
+    <div class="ss-sub"><span class="ss-id">${meta}</span>${stamp(s.lastActivity || s.start)}</div>
+    ${lines}
+  </div>`;
+}
+
+function buildIpWithSessions(g) {
+  const sessions = [...g.sessions].sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+  const a = aggregateIp(sessions);
+  const proto = [...a.proto].join("/");
+  const meta = headMeta(proto, a.sessions, a.active, state.geo.get(g.ip));
+  return `<div class="ev ss">
+    <span class="ev-badge ${a.active ? "connect" : "info"}">${a.active ? "ACTIVE" : "DONE"}</span>
+    <span class="ev-body">
+      ${head(g.ip, meta, a.last)}
+      <div class="ss-group">${sessions.map(buildSessionBlock).join("")}</div>
     </span>
   </div>`;
 }
 
 export function renderSummaryFeed() {
   if (!feedCleared) { feedEl.innerHTML = ""; feedCleared = true; }
-  const sessions = Array.from(state.sessions.values())
-    .filter((s) => s.ip)
-    .sort((a, b) => (b.lastActivity || "").localeCompare(a.lastActivity || ""))
-    .slice(0, 50);
-  feedEl.innerHTML = sessions.map(buildSessionSummary).join("") ||
-    '<div class="feed-empty">awaiting sessions…</div>';
+  const groups = new Map();
+  for (const s of state.sessions.values()) {
+    if (!s.ip) continue;
+    let g = groups.get(s.ip);
+    if (!g) { g = { ip: s.ip, sessions: [] }; groups.set(s.ip, g); }
+    g.sessions.push(s);
+  }
+  const sorted = Array.from(groups.values()).sort((a, b) => {
+    const la = a.sessions.reduce((m, s) => (s.lastActivity && (!m || s.lastActivity > m) ? s.lastActivity : m), null);
+    const lb = b.sessions.reduce((m, s) => (s.lastActivity && (!m || s.lastActivity > m) ? s.lastActivity : m), null);
+    return (lb || "").localeCompare(la || "");
+  }).slice(0, 50);
+
+  const cards = sorted.map((g) => filters.feed.groupBySession ? buildIpWithSessions(g) : buildIpSummary(g));
+  feedEl.innerHTML = cards.join("") || '<div class="feed-empty">awaiting sessions…</div>';
 }
 
 function renderRawFeed() {
@@ -112,6 +193,6 @@ function renderRawFeed() {
 }
 
 export function renderFeed() {
-  if (filters.feed.summarize) renderSummaryFeed();
+  if (filters.feed.groupByIp) renderSummaryFeed();
   else renderRawFeed();
 }

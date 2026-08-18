@@ -631,12 +631,32 @@ body {
 /* session summary feed */
 .ev.ss { flex-wrap: wrap; }
 .ev.ss .ss-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 12px;
   color: var(--text);
   margin-bottom: 3px;
 }
 .ev.ss .ss-head .ip { color: var(--cyan); font-weight: 600; }
 .ev.ss .ss-meta { color: var(--muted); font-size: 10px; }
+.ev.ss .ss-time {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 9px;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.ev.ss .ss-group { margin-left: 3px; padding-left: 9px; border-left: 1px solid var(--line); }
+.ev.ss .ss-session { margin: 4px 0; }
+.ev.ss .ss-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--text);
+}
+.ev.ss .ss-id { color: var(--muted); font-family: var(--font-mono); }
 .ev.ss .ss-line { font-size: 10.5px; color: var(--text); margin: 2px 0; word-break: break-word; }
 .ev.ss .ss-k {
   font-family: var(--font-display); font-size: 8.5px; letter-spacing: 1px; font-weight: 600;

@@ -27,7 +27,7 @@ export const state = {
 export const filters = {
   sessions: { text: "", sev: "all", group: false },
   malware: { text: "", vt: "all", group: false },
-  feed: { summarize: false },
+  feed: { groupByIp: false, groupBySession: false },
 };
 
 // Mutable cross-module flags. Exposed as an object because ES module imports

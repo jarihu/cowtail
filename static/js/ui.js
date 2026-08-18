@@ -128,9 +128,22 @@ export function setupFilters() {
     shared.renderDirty = true;
   });
 
-  const summarizeFeed = document.getElementById("summarizeFeed");
-  if (summarizeFeed) summarizeFeed.addEventListener("change", () => {
-    filters.feed.summarize = summarizeFeed.checked;
+  const summarizeFeedIp = document.getElementById("summarizeFeedIp");
+  const summarizeFeedSession = document.getElementById("summarizeFeedSession");
+  if (summarizeFeedIp) summarizeFeedIp.addEventListener("change", () => {
+    filters.feed.groupByIp = summarizeFeedIp.checked;
+    if (!summarizeFeedIp.checked && summarizeFeedSession) {
+      summarizeFeedSession.checked = false;
+      filters.feed.groupBySession = false;
+    }
+    renderFeed();
+  });
+  if (summarizeFeedSession) summarizeFeedSession.addEventListener("change", () => {
+    filters.feed.groupBySession = summarizeFeedSession.checked;
+    if (summarizeFeedSession.checked && summarizeFeedIp) {
+      summarizeFeedIp.checked = true;
+      filters.feed.groupByIp = true;
+    }
     renderFeed();
   });
 

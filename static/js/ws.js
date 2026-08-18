@@ -54,10 +54,11 @@ export function connect() {
     } else if (data.type === "event") {
       if (data.geo) applyGeo(data.event.src_ip, data.geo);
       handleEvent(data.event);
-      if (filters.feed.summarize) renderSummaryFeed();
+      if (filters.feed.groupByIp) renderSummaryFeed();
       else pushFeed(data.event);
     } else if (data.type === "geo") {
       applyGeo(data.ip, data.geo);
+      if (filters.feed.groupByIp) renderSummaryFeed();
       const g = state.attackers.get(data.ip);
       if (g && g.connections > 0) spawnMissile(data.ip);
     }

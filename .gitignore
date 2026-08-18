@@ -24,3 +24,6 @@ Thumbs.db
 .vscode/
 
 graphify-out/
+.agents/
+.claude
+skills-lock.json
