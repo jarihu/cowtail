@@ -299,6 +299,26 @@ class HistoryStore:
             ).fetchone()
         return row is not None
 
+    def report_for_hash(self, hash_: str) -> dict | None:
+        """Most recent persisted threat-intel verdict for a file hash, if any.
+
+        Used to backfill the live dashboard: a hash's cowrie.virustotal.scanfile
+        event may have been logged long before this process started (or in a
+        now-rotated log file), so the live in-memory event buffer alone can't
+        always show a verdict the persisted store already has.
+        """
+        with self._guard:
+            row = self._conn.execute(
+                "SELECT positives, total, permalink FROM reports"
+                " WHERE (sha256 = ? OR shasum = ?) AND positives IS NOT NULL"
+                " ORDER BY ts DESC LIMIT 1",
+                (hash_, hash_),
+            ).fetchone()
+        if row is None:
+            return None
+        positives, total, permalink = row
+        return {"positives": positives, "total": total, "permalink": permalink}
+
     def mark_ingested(
         self, path: str, mtime: int, size: int, events: int, parsed_at: str
     ) -> None:

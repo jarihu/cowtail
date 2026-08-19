@@ -61,6 +61,10 @@ class CowrieMonitor:
         self._pending_ips: set[str] = set()
         self._ingest_lock = asyncio.Lock()
         self._ingest_geo_sem = asyncio.Semaphore(8)
+        # Hashes we've already tried to backfill a VT verdict for (from the
+        # persisted store) this run, so a hash downloaded repeatedly doesn't
+        # re-query SQLite on every hit.
+        self._vt_seen: set[str] = set()
 
         # /api/stats and /api/history recompute a couple dozen SQL queries
         # over the whole matched range — cheap once, wasteful on every page
@@ -98,6 +102,10 @@ class CowrieMonitor:
             self.events = self.events[-100_000:]
         if not self._sensor or self._sensor == "demo-sensor":
             self._sensor = self._sensor_from_event(ev)
+        if ev.get("eventid") == "cowrie.session.file_download":
+            shasum = ev.get("shasum")
+            if shasum and self.store is not None:
+                asyncio.create_task(self._backfill_vt(shasum))
         if broadcast:
             ip = ev.get("src_ip")
             if ip:
@@ -111,6 +119,34 @@ class CowrieMonitor:
                     }
                 )
             )
+
+    async def _backfill_vt(self, shasum: str) -> None:
+        # A download's VT verdict may only live in the persisted store: the
+        # scan that produced it can predate this process (restart, log
+        # rotation) or never repeat for a hash cowrie has already resolved
+        # (common — the same payload gets downloaded over and over). Without
+        # this, only a hash whose live cowrie.virustotal.scanfile event
+        # happens to arrive in *this* process's in-memory event buffer ever
+        # gets a verdict on the live dashboard, even though history (which
+        # reads the whole persisted store) already has it.
+        if shasum in self._vt_seen:
+            return
+        self._vt_seen.add(shasum)
+        report = await asyncio.to_thread(self.store.report_for_hash, shasum)
+        if report is None:
+            return
+        self.ingest_event(
+            {
+                "eventid": "cowrie.virustotal.scanfile",
+                "timestamp": now_iso(),
+                "sha256": shasum,
+                "positives": report["positives"],
+                "total": report["total"],
+                "permalink": report.get("permalink"),
+                "is_new": "false",
+            },
+            broadcast=True,
+        )
 
     async def _resolve_and_broadcast(self, ip: str) -> None:
         if ip in self._pending_ips or self.resolver.known(ip):
